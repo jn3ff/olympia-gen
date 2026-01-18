@@ -2,7 +2,7 @@ use avian2d::prelude::*;
 use bevy::ecs::message::{Message, MessageReader, MessageWriter};
 use bevy::prelude::*;
 
-use crate::movement::{Facing, MovementInput, MovementState, Player};
+use crate::movement::{Facing, GameLayer, MovementInput, MovementState, Player};
 
 // ============================================================================
 // Components
@@ -727,10 +727,15 @@ pub struct EnemyBundle {
     pub rigid_body: RigidBody,
     pub collider: Collider,
     pub collision_events: CollisionEventsEnabled,
+    pub collision_layers: CollisionLayers,
+    pub velocity: LinearVelocity,
+    pub damping: LinearDamping,
+    pub locked_axes: LockedAxes,
+    pub gravity_scale: GravityScale,
 }
 
 impl EnemyBundle {
-    pub fn new(tier: EnemyTier, position: Vec2, base_health: f32, tuning: &EnemyTuning) -> Self {
+    pub fn new(tier: EnemyTier, position: Vec2, base_health: f32, _tuning: &EnemyTuning) -> Self {
         let (health_mult, _damage_mult, _speed_mult) = tier.stat_multipliers();
         let scale = tier.scale();
         let size = Vec2::new(32.0 * scale, 32.0 * scale);
@@ -755,9 +760,14 @@ impl EnemyBundle {
                 ..default()
             },
             transform: Transform::from_xyz(position.x, position.y, 0.0),
-            rigid_body: RigidBody::Kinematic,
+            rigid_body: RigidBody::Dynamic,
             collider: Collider::rectangle(size.x, size.y),
             collision_events: CollisionEventsEnabled,
+            collision_layers: CollisionLayers::new(GameLayer::Enemy, [GameLayer::Ground, GameLayer::Wall]),
+            velocity: LinearVelocity::default(),
+            damping: LinearDamping(5.0), // High damping to quickly decay knockback velocity
+            locked_axes: LockedAxes::ROTATION_LOCKED,
+            gravity_scale: GravityScale(1.0), // Normal gravity so enemies fall after knockback
         }
     }
 }
@@ -799,25 +809,38 @@ pub fn spawn_boss_scaled(
 
     commands
         .spawn((
-            Enemy,
-            tier,
-            Combatant,
-            Team::Enemy,
-            Health::new(final_health),
-            Stagger::default(),
-            Invulnerable::default(),
-            BossAI::default(),
-            attack_slots,
-            BossAttackCooldowns::default(),
-            Sprite {
-                color: tier.color(),
-                custom_size: Some(size),
-                ..default()
-            },
-            Transform::from_xyz(position.x, position.y, 0.0),
-            RigidBody::Kinematic,
-            Collider::rectangle(size.x, size.y),
-            CollisionEventsEnabled,
+            // Identity & Combat
+            (
+                Enemy,
+                tier,
+                Combatant,
+                Team::Enemy,
+                Health::new(final_health),
+                Stagger::default(),
+                Invulnerable::default(),
+            ),
+            // Boss AI
+            (BossAI::default(), attack_slots, BossAttackCooldowns::default()),
+            // Rendering
+            (
+                Sprite {
+                    color: tier.color(),
+                    custom_size: Some(size),
+                    ..default()
+                },
+                Transform::from_xyz(position.x, position.y, 0.0),
+            ),
+            // Physics
+            (
+                RigidBody::Dynamic,
+                Collider::rectangle(size.x, size.y),
+                CollisionEventsEnabled,
+                CollisionLayers::new(GameLayer::Enemy, [GameLayer::Ground, GameLayer::Wall]),
+                LinearVelocity::default(),
+                LinearDamping(3.0), // Moderate damping for bosses
+                LockedAxes::ROTATION_LOCKED,
+                GravityScale(1.0), // Normal gravity so boss falls after knockback
+            ),
         ))
         .id()
 }
@@ -1235,60 +1258,57 @@ fn update_boss_ai(
 }
 
 fn apply_enemy_movement(
-    time: Res<Time>,
     tuning: Res<EnemyTuning>,
     player_query: Query<&Transform, With<Player>>,
     mut enemy_query: Query<
-        (&mut Transform, &EnemyAI, &EnemyTier),
+        (&Transform, &mut LinearVelocity, &EnemyAI, &EnemyTier),
         (With<Enemy>, Without<Player>, Without<BossAI>),
     >,
 ) {
-    let dt = time.delta_secs();
-
     let Some(player_transform) = player_query.iter().next() else {
         return;
     };
     let player_pos = player_transform.translation.truncate();
 
-    for (mut transform, ai, tier) in &mut enemy_query {
+    for (transform, mut velocity, ai, tier) in &mut enemy_query {
         let enemy_pos = transform.translation.truncate();
         let (_, _, speed_mult) = tier.stat_multipliers();
 
+        // Only apply horizontal movement velocity, let physics handle the rest
         match ai.state {
             AIState::Patrol => {
                 if ai.state_timer > tuning.patrol_pause_time {
-                    transform.translation.x +=
-                        ai.patrol_direction * tuning.move_speed * speed_mult * dt;
+                    velocity.x = ai.patrol_direction * tuning.move_speed * speed_mult;
                 }
             }
             AIState::Chase => {
                 let dir = (player_pos - enemy_pos).normalize_or_zero();
-                transform.translation.x += dir.x * tuning.chase_speed * speed_mult * dt;
+                velocity.x = dir.x * tuning.chase_speed * speed_mult;
             }
-            AIState::Attack | AIState::Staggered => {}
+            AIState::Attack | AIState::Staggered => {
+                // Let damping naturally slow them down during attack/stagger
+            }
         }
     }
 }
 
 fn apply_boss_movement(
-    time: Res<Time>,
     player_query: Query<&Transform, With<Player>>,
-    mut boss_query: Query<(&mut Transform, &BossAI), (With<Enemy>, Without<Player>)>,
+    mut boss_query: Query<(&Transform, &mut LinearVelocity, &BossAI), (With<Enemy>, Without<Player>)>,
 ) {
-    let dt = time.delta_secs();
-
     let Some(player_transform) = player_query.iter().next() else {
         return;
     };
     let player_pos = player_transform.translation.truncate();
 
-    for (mut transform, ai) in &mut boss_query {
+    for (transform, mut velocity, ai) in &mut boss_query {
         let boss_pos = transform.translation.truncate();
 
         if ai.state == BossState::Moving {
             let dir = (player_pos - boss_pos).normalize_or_zero();
-            transform.translation.x += dir.x * 100.0 * dt;
+            velocity.x = dir.x * 100.0;
         }
+        // Other states: let damping slow them down
     }
 }
 
@@ -1475,14 +1495,33 @@ fn apply_damage(
     }
 }
 
+/// Maximum velocity an entity can have after knockback
+const MAX_KNOCKBACK_VELOCITY: f32 = 800.0;
+/// Minimum upward knockback to give a small lift
+const MIN_VERTICAL_KNOCKBACK: f32 = 100.0;
+
 fn apply_knockback(
     mut damage_events: MessageReader<DamageEvent>,
     mut query: Query<&mut LinearVelocity>,
 ) {
     for event in damage_events.read() {
         if let Ok(mut velocity) = query.get_mut(event.target) {
+            // Apply knockback
             velocity.x += event.knockback.x;
-            velocity.y += event.knockback.y.max(100.0);
+            velocity.y += event.knockback.y.max(MIN_VERTICAL_KNOCKBACK);
+
+            // Clamp final velocity to prevent extreme values
+            let speed = (velocity.x * velocity.x + velocity.y * velocity.y).sqrt();
+            if speed > MAX_KNOCKBACK_VELOCITY {
+                let scale = MAX_KNOCKBACK_VELOCITY / speed;
+                velocity.x *= scale;
+                velocity.y *= scale;
+            }
+
+            debug!(
+                "Knockback applied: knockback={:?}, final_velocity=({:.1}, {:.1})",
+                event.knockback, velocity.x, velocity.y
+            );
         }
     }
 }

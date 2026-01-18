@@ -5,6 +5,27 @@ use crate::combat::{
     AttackState, Combatant, Health, Invulnerable, SkillSlots, Stagger, Team, Weapon,
 };
 
+// ============================================================================
+// Physics Layers
+// ============================================================================
+
+/// Physics layers for collision filtering
+#[derive(PhysicsLayer, Clone, Copy, Debug, Default)]
+pub enum GameLayer {
+    #[default]
+    Default,
+    /// Ground surfaces (floors, platforms)
+    Ground,
+    /// Wall surfaces
+    Wall,
+    /// Player character
+    Player,
+    /// Enemy characters
+    Enemy,
+    /// Sensors (portals, triggers) - should not block movement
+    Sensor,
+}
+
 #[derive(Component, Debug)]
 pub struct Player;
 
@@ -130,14 +151,17 @@ impl Plugin for MovementPlugin {
     }
 }
 
-fn spawn_player(mut commands: Commands) {
+fn spawn_player(mut commands: Commands, tuning: Res<MovementTuning>) {
     commands.spawn((
         // Identity & Movement
         (
             Player,
             Combatant,
             Team::Player,
-            MovementState::default(),
+            MovementState {
+                air_jumps_remaining: tuning.max_air_jumps,
+                ..default()
+            },
             WallJumpLock::default(),
         ),
         // Combat
@@ -165,6 +189,7 @@ fn spawn_player(mut commands: Commands) {
             GravityScale(0.0), // We handle gravity manually for more control
             Friction::new(0.0),
             CollisionEventsEnabled,
+            CollisionLayers::new(GameLayer::Player, [GameLayer::Ground, GameLayer::Wall]),
         ),
     ));
 }
@@ -173,6 +198,9 @@ fn spawn_test_room(mut commands: Commands) {
     let wall_color = Color::srgb(0.3, 0.3, 0.4);
     let ground_color = Color::srgb(0.4, 0.5, 0.4);
     let platform_color = Color::srgb(0.5, 0.4, 0.3);
+
+    let ground_layers = CollisionLayers::new(GameLayer::Ground, [GameLayer::Player, GameLayer::Enemy]);
+    let wall_layers = CollisionLayers::new(GameLayer::Wall, [GameLayer::Player, GameLayer::Enemy]);
 
     // Ground
     commands.spawn((
@@ -185,6 +213,7 @@ fn spawn_test_room(mut commands: Commands) {
         Transform::from_xyz(0.0, -200.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(800.0, 40.0),
+        ground_layers,
     ));
 
     // Left wall
@@ -198,6 +227,7 @@ fn spawn_test_room(mut commands: Commands) {
         Transform::from_xyz(-420.0, 50.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(40.0, 500.0),
+        wall_layers,
     ));
 
     // Right wall
@@ -211,6 +241,7 @@ fn spawn_test_room(mut commands: Commands) {
         Transform::from_xyz(420.0, 50.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(40.0, 500.0),
+        wall_layers,
     ));
 
     // Platform 1 - left side
@@ -224,6 +255,7 @@ fn spawn_test_room(mut commands: Commands) {
         Transform::from_xyz(-250.0, -50.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(150.0, 20.0),
+        ground_layers,
     ));
 
     // Platform 2 - right side, higher
@@ -237,6 +269,7 @@ fn spawn_test_room(mut commands: Commands) {
         Transform::from_xyz(250.0, 50.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(150.0, 20.0),
+        ground_layers,
     ));
 
     // Platform 3 - center, highest
@@ -250,6 +283,7 @@ fn spawn_test_room(mut commands: Commands) {
         Transform::from_xyz(0.0, 150.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(120.0, 20.0),
+        ground_layers,
     ));
 
     // Small pillar for wall jumping practice
@@ -263,6 +297,7 @@ fn spawn_test_room(mut commands: Commands) {
         Transform::from_xyz(-100.0, -80.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(30.0, 200.0),
+        wall_layers,
     ));
 }
 
@@ -298,6 +333,9 @@ fn detect_ground(
     tuning: Res<MovementTuning>,
     mut query: Query<(&Transform, &Collider, &mut MovementState), With<Player>>,
 ) {
+    // Filter to only hit Ground layer entities (not enemies, portals, etc.)
+    let ground_filter = SpatialQueryFilter::from_mask(GameLayer::Ground);
+
     for (transform, collider, mut state) in &mut query {
         let was_on_ground = state.on_ground;
 
@@ -316,7 +354,7 @@ fn detect_ground(
             ray_direction,
             ray_distance,
             true,
-            &SpatialQueryFilter::default(),
+            &ground_filter,
         );
 
         state.on_ground = hit.is_some();
@@ -325,6 +363,15 @@ fn detect_ground(
         if state.on_ground && !was_on_ground {
             state.coyote_timer = 0.0;
             state.air_jumps_remaining = tuning.max_air_jumps;
+            debug!(
+                "Landed: on_ground={}, air_jumps_remaining={}",
+                state.on_ground, state.air_jumps_remaining
+            );
+        } else if !state.on_ground && was_on_ground {
+            debug!(
+                "Left ground: on_ground={}, air_jumps_remaining={}",
+                state.on_ground, state.air_jumps_remaining
+            );
         }
     }
 }
@@ -333,6 +380,9 @@ fn detect_walls(
     spatial_query: SpatialQuery,
     mut query: Query<(&Transform, &Collider, &mut MovementState), With<Player>>,
 ) {
+    // Filter to only hit Wall layer entities
+    let wall_filter = SpatialQueryFilter::from_mask(GameLayer::Wall);
+
     for (transform, collider, mut state) in &mut query {
         let was_on_wall = state.on_wall;
 
@@ -350,7 +400,7 @@ fn detect_walls(
             Dir2::NEG_X,
             player_half_width + ray_distance,
             true,
-            &SpatialQueryFilter::default(),
+            &wall_filter,
         );
 
         // Check right
@@ -359,7 +409,7 @@ fn detect_walls(
             Dir2::X,
             player_half_width + ray_distance,
             true,
-            &SpatialQueryFilter::default(),
+            &wall_filter,
         );
 
         state.on_wall = match (left_hit.is_some(), right_hit.is_some()) {
@@ -489,6 +539,10 @@ fn apply_jump(
                 velocity.y = tuning.jump_velocity;
                 state.jump_buffer_timer = 0.0;
                 state.coyote_timer = tuning.coyote_time; // Consume coyote time
+                debug!(
+                    "Ground jump: on_ground={}, coyote consumed, air_jumps_remaining={}",
+                    state.on_ground, state.air_jumps_remaining
+                );
             } else if can_wall_jump {
                 // Wall jump
                 let wall_dir = if state.on_wall == WallContact::Left {
@@ -510,11 +564,19 @@ fn apply_jump(
                 state.wall_coyote_timer = tuning.wall_coyote_time;
                 // Wall jump also resets air jumps
                 state.air_jumps_remaining = tuning.max_air_jumps;
+                debug!(
+                    "Wall jump: on_wall={:?}, air_jumps reset to {}",
+                    state.on_wall, state.air_jumps_remaining
+                );
             } else if can_air_jump {
                 // Air jump (double jump, triple jump, etc.)
                 velocity.y = tuning.jump_velocity;
                 state.jump_buffer_timer = 0.0;
                 state.air_jumps_remaining -= 1;
+                debug!(
+                    "Air jump: air_jumps_remaining now {}",
+                    state.air_jumps_remaining
+                );
             }
         }
 

@@ -9,7 +9,7 @@ use crate::combat::{
 };
 use crate::content::Direction;
 use crate::core::{DifficultyScaling, RunConfig, RunState};
-use crate::movement::{Ground, Player, Wall};
+use crate::movement::{GameLayer, Ground, Player, Wall};
 
 // ============================================================================
 // Components
@@ -59,6 +59,77 @@ pub struct DirectionButton {
     pub direction: Direction,
 }
 
+/// Marker indicating a portal/exit is enabled and can be used for transitions
+#[derive(Component, Debug, Default)]
+pub struct PortalEnabled;
+
+/// Marker indicating a portal/exit is disabled and cannot be used for transitions
+#[derive(Component, Debug, Default)]
+pub struct PortalDisabled;
+
+/// Condition that determines when a portal/exit becomes enabled
+#[derive(Debug, Clone, PartialEq)]
+pub enum PortalEnableCondition {
+    /// Portal is always enabled from the start
+    AlwaysEnabled,
+    /// Portal enables when no enemies remain in the room
+    NoEnemiesRemaining,
+    /// All sub-conditions must be met
+    All(Vec<PortalEnableCondition>),
+    /// Any sub-condition must be met
+    Any(Vec<PortalEnableCondition>),
+}
+
+impl Default for PortalEnableCondition {
+    fn default() -> Self {
+        Self::AlwaysEnabled
+    }
+}
+
+/// Configuration for a single exit in a room
+#[derive(Debug, Clone)]
+pub struct RoomExitConfig {
+    pub direction: Direction,
+    pub condition: PortalEnableCondition,
+}
+
+impl RoomExitConfig {
+    pub fn new(direction: Direction) -> Self {
+        Self {
+            direction,
+            condition: PortalEnableCondition::AlwaysEnabled,
+        }
+    }
+
+    pub fn with_condition(mut self, condition: PortalEnableCondition) -> Self {
+        self.condition = condition;
+        self
+    }
+
+    pub fn always_enabled(direction: Direction) -> Self {
+        Self::new(direction)
+    }
+
+    pub fn when_cleared(direction: Direction) -> Self {
+        Self {
+            direction,
+            condition: PortalEnableCondition::NoEnemiesRemaining,
+        }
+    }
+}
+
+/// Component that holds the enable condition for a portal/exit
+#[derive(Component, Debug, Clone)]
+pub struct PortalCondition {
+    pub condition: PortalEnableCondition,
+}
+
+impl PortalCondition {
+    pub fn new(condition: PortalEnableCondition) -> Self {
+        Self { condition }
+    }
+}
+
 // ============================================================================
 // Resources
 // ============================================================================
@@ -83,11 +154,42 @@ pub struct RoomRegistry {
     pub rooms: Vec<RoomData>,
 }
 
+/// Cooldown timer to prevent rapid/double transitions between rooms
+#[derive(Resource, Debug)]
+pub struct TransitionCooldown {
+    pub timer: Timer,
+}
+
+impl Default for TransitionCooldown {
+    fn default() -> Self {
+        Self {
+            timer: Timer::from_seconds(0.3, TimerMode::Once),
+        }
+    }
+}
+
+impl TransitionCooldown {
+    pub fn reset(&mut self) {
+        self.timer.reset();
+    }
+
+    pub fn tick(&mut self, delta: std::time::Duration) {
+        self.timer.tick(delta);
+    }
+
+    pub fn can_transition(&self) -> bool {
+        self.timer.remaining_secs() == 0.0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RoomData {
     pub id: String,
     pub name: String,
     pub exits: Vec<Direction>,
+    /// Optional per-exit configuration. If provided, overrides the default condition for exits.
+    /// Exits listed in `exits` but not in `exit_configs` use AlwaysEnabled by default.
+    pub exit_configs: Option<Vec<RoomExitConfig>>,
     pub boss_room: bool,
     pub width: f32,
     pub height: f32,
@@ -99,9 +201,30 @@ impl Default for RoomData {
             id: "default".to_string(),
             name: "Default Room".to_string(),
             exits: vec![Direction::Left, Direction::Right],
+            exit_configs: None,
             boss_room: false,
             width: 800.0,
             height: 500.0,
+        }
+    }
+}
+
+impl RoomData {
+    /// Get the condition for a specific exit direction.
+    /// Returns the configured condition if exit_configs is set, otherwise defaults based on room type.
+    pub fn get_exit_condition(&self, direction: Direction) -> PortalEnableCondition {
+        // Check if we have explicit exit configs
+        if let Some(configs) = &self.exit_configs {
+            if let Some(config) = configs.iter().find(|c| c.direction == direction) {
+                return config.condition.clone();
+            }
+        }
+
+        // Default behavior: boss rooms require clearing, regular rooms are always enabled
+        if self.boss_room {
+            PortalEnableCondition::NoEnemiesRemaining
+        } else {
+            PortalEnableCondition::AlwaysEnabled
         }
     }
 }
@@ -149,15 +272,17 @@ impl Plugin for RoomsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RoomGraph>()
             .init_resource::<RoomRegistry>()
+            .init_resource::<TransitionCooldown>()
             .add_message::<RoomClearedEvent>()
             .add_message::<BossDefeatedEvent>()
             .add_message::<EnterRoomEvent>()
             .add_message::<ExitRoomEvent>()
             .add_systems(Startup, setup_room_registry)
-            .add_systems(OnEnter(RunState::Arena), spawn_arena_hub)
+            .add_systems(OnEnter(RunState::Arena), (reset_transition_cooldown, drain_stale_collision_events, spawn_arena_hub).chain())
             .add_systems(OnExit(RunState::Arena), cleanup_arena)
-            .add_systems(OnEnter(RunState::Room), spawn_current_room)
+            .add_systems(OnEnter(RunState::Room), (reset_transition_cooldown, drain_stale_collision_events, spawn_current_room).chain())
             .add_systems(OnExit(RunState::Room), cleanup_room)
+            .add_systems(Update, tick_transition_cooldown)
             .add_systems(
                 Update,
                 (
@@ -170,6 +295,7 @@ impl Plugin for RoomsPlugin {
             .add_systems(
                 Update,
                 (
+                    evaluate_portal_conditions,
                     detect_exit_collision,
                     process_room_transitions,
                     handle_boss_defeated,
@@ -184,6 +310,24 @@ impl Plugin for RoomsPlugin {
 // Setup Systems
 // ============================================================================
 
+fn reset_transition_cooldown(mut cooldown: ResMut<TransitionCooldown>) {
+    cooldown.reset();
+    info!("[TRANSITION] Cooldown reset on state enter");
+}
+
+fn tick_transition_cooldown(mut cooldown: ResMut<TransitionCooldown>, time: Res<Time>) {
+    cooldown.tick(time.delta());
+}
+
+fn drain_stale_collision_events(
+    mut collision_start_events: MessageReader<CollisionStart>,
+) {
+    let count = collision_start_events.read().count();
+    if count > 0 {
+        info!("[TRANSITION] Drained {} stale collision events on state enter", count);
+    }
+}
+
 fn setup_room_registry(mut registry: ResMut<RoomRegistry>) {
     // Register default rooms - in a full implementation these would come from RON files
     registry.rooms = vec![
@@ -191,6 +335,12 @@ fn setup_room_registry(mut registry: ResMut<RoomRegistry>) {
             id: "room_left_1".to_string(),
             name: "Western Chamber".to_string(),
             exits: vec![Direction::Right, Direction::Up],
+            exit_configs: Some(vec![
+                // Right exit requires clearing enemies first
+                RoomExitConfig::when_cleared(Direction::Right),
+                // Up exit is always enabled (escape route)
+                RoomExitConfig::always_enabled(Direction::Up),
+            ]),
             boss_room: false,
             width: 800.0,
             height: 500.0,
@@ -199,6 +349,10 @@ fn setup_room_registry(mut registry: ResMut<RoomRegistry>) {
             id: "room_right_1".to_string(),
             name: "Eastern Hall".to_string(),
             exits: vec![Direction::Left, Direction::Down],
+            exit_configs: Some(vec![
+                RoomExitConfig::when_cleared(Direction::Left),
+                RoomExitConfig::always_enabled(Direction::Down),
+            ]),
             boss_room: false,
             width: 900.0,
             height: 450.0,
@@ -207,6 +361,11 @@ fn setup_room_registry(mut registry: ResMut<RoomRegistry>) {
             id: "room_up_1".to_string(),
             name: "Upper Sanctum".to_string(),
             exits: vec![Direction::Down, Direction::Left, Direction::Right],
+            exit_configs: Some(vec![
+                RoomExitConfig::always_enabled(Direction::Down),
+                RoomExitConfig::when_cleared(Direction::Left),
+                RoomExitConfig::when_cleared(Direction::Right),
+            ]),
             boss_room: false,
             width: 1000.0,
             height: 600.0,
@@ -215,6 +374,9 @@ fn setup_room_registry(mut registry: ResMut<RoomRegistry>) {
             id: "room_down_1".to_string(),
             name: "Lower Depths".to_string(),
             exits: vec![Direction::Up],
+            exit_configs: Some(vec![
+                RoomExitConfig::when_cleared(Direction::Up),
+            ]),
             boss_room: false,
             width: 700.0,
             height: 400.0,
@@ -223,6 +385,10 @@ fn setup_room_registry(mut registry: ResMut<RoomRegistry>) {
             id: "boss_room".to_string(),
             name: "Champion's Arena".to_string(),
             exits: vec![Direction::Down],
+            // Boss room exit requires defeating the boss (no enemies remaining)
+            exit_configs: Some(vec![
+                RoomExitConfig::when_cleared(Direction::Down),
+            ]),
             boss_room: true,
             width: 1200.0,
             height: 700.0,
@@ -257,6 +423,9 @@ fn spawn_arena_hub(
     let ground_color = Color::srgb(0.35, 0.4, 0.35);
     let portal_color = Color::srgb(0.4, 0.6, 0.9);
 
+    let ground_layers = CollisionLayers::new(GameLayer::Ground, [GameLayer::Player, GameLayer::Enemy]);
+    let wall_layers = CollisionLayers::new(GameLayer::Wall, [GameLayer::Player, GameLayer::Enemy]);
+
     // Spawn arena container
     commands.spawn((ArenaHub, Transform::default(), Visibility::default()));
 
@@ -271,6 +440,7 @@ fn spawn_arena_hub(
         Transform::from_xyz(0.0, -150.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(600.0, 40.0),
+        ground_layers,
     ));
 
     // Left wall
@@ -284,6 +454,7 @@ fn spawn_arena_hub(
         Transform::from_xyz(-320.0, 30.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(40.0, 400.0),
+        wall_layers,
     ));
 
     // Right wall
@@ -297,6 +468,7 @@ fn spawn_arena_hub(
         Transform::from_xyz(320.0, 30.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(40.0, 400.0),
+        wall_layers,
     ));
 
     // Ceiling
@@ -310,6 +482,7 @@ fn spawn_arena_hub(
         Transform::from_xyz(0.0, 250.0, 0.0),
         RigidBody::Static,
         Collider::rectangle(600.0, 40.0),
+        wall_layers,
     ));
 
     // Directional portals
@@ -329,6 +502,7 @@ fn spawn_arena_hub(
         commands.spawn((
             ArenaPortal { direction },
             ExitTrigger,
+            PortalEnabled,
             Sprite {
                 color: portal_color,
                 custom_size: Some(size),
@@ -493,12 +667,20 @@ fn cleanup_arena(
 
 fn handle_arena_portal_interaction(
     mut collision_events: MessageReader<CollisionStart>,
-    portal_query: Query<&ArenaPortal>,
+    portal_query: Query<(&ArenaPortal, Option<&PortalEnabled>)>,
     player_query: Query<Entity, With<Player>>,
+    cooldown: Res<TransitionCooldown>,
     mut room_graph: ResMut<RoomGraph>,
     registry: Res<RoomRegistry>,
     mut next_state: ResMut<NextState<RunState>>,
 ) {
+    // Check cooldown before allowing any transitions
+    if !cooldown.can_transition() {
+        // Consume events without processing during cooldown
+        for _ in collision_events.read() {}
+        return;
+    }
+
     let Some(player_entity) = player_query.iter().next() else {
         return;
     };
@@ -516,17 +698,26 @@ fn handle_arena_portal_interaction(
             continue;
         }
 
-        if let Ok(portal) = portal_query.get(portal_entity) {
+        if let Ok((portal, portal_enabled)) = portal_query.get(portal_entity) {
+            // Only react to portals marked as PortalEnabled
+            if portal_enabled.is_none() {
+                info!("[TRANSITION] Ignoring arena portal {:?} - not PortalEnabled", portal.direction);
+                continue;
+            }
+
             // Find a room for this direction
             let target_room = find_room_for_direction(&registry, portal.direction);
 
             if let Some(room_id) = target_room {
+                info!("[TRANSITION] Arena portal {:?} -> room '{}'", portal.direction, room_id);
                 room_graph.pending_transition = Some(RoomTransition {
                     from_room: None,
-                    to_room: room_id,
+                    to_room: room_id.clone(),
                     entry_direction: opposite_direction(portal.direction),
                 });
+                info!("[TRANSITION] pending_transition set: {:?}", room_graph.pending_transition);
                 next_state.set(RunState::Room);
+                info!("[TRANSITION] RunState changed to Room");
             }
         }
     }
@@ -547,10 +738,16 @@ fn update_direction_choice_ui(
 fn handle_direction_button_click(
     keyboard: Res<ButtonInput<KeyCode>>,
     button_query: Query<(&DirectionButton, &Interaction)>,
+    cooldown: Res<TransitionCooldown>,
     mut room_graph: ResMut<RoomGraph>,
     registry: Res<RoomRegistry>,
     mut next_state: ResMut<NextState<RunState>>,
 ) {
+    // Check cooldown before allowing any transitions
+    if !cooldown.can_transition() {
+        return;
+    }
+
     // Check keyboard shortcuts
     let direction = if keyboard.just_pressed(KeyCode::KeyW)
         || keyboard.just_pressed(KeyCode::ArrowUp)
@@ -572,12 +769,15 @@ fn handle_direction_button_click(
 
     if let Some(dir) = direction {
         if let Some(room_id) = find_room_for_direction(&registry, dir) {
+            info!("[TRANSITION] Direction button {:?} -> room '{}'", dir, room_id);
             room_graph.pending_transition = Some(RoomTransition {
                 from_room: None,
-                to_room: room_id,
+                to_room: room_id.clone(),
                 entry_direction: opposite_direction(dir),
             });
+            info!("[TRANSITION] pending_transition set: {:?}", room_graph.pending_transition);
             next_state.set(RunState::Room);
+            info!("[TRANSITION] RunState changed to Room");
         }
     }
 }
@@ -730,12 +930,17 @@ fn spawn_room_geometry(
 ) {
     let wall_color = Color::srgb(0.3, 0.3, 0.4);
     let ground_color = Color::srgb(0.4, 0.5, 0.4);
-    let exit_color = Color::srgb(0.3, 0.7, 0.4);
-    let boss_exit_color = Color::srgb(0.7, 0.3, 0.3);
+    let exit_enabled_color = Color::srgb(0.3, 0.7, 0.4);
+    let exit_disabled_color = Color::srgb(0.5, 0.5, 0.5);
+    let boss_exit_enabled_color = Color::srgb(0.7, 0.3, 0.3);
+    let boss_exit_disabled_color = Color::srgb(0.4, 0.3, 0.3);
 
     let half_width = room.width / 2.0;
     let half_height = room.height / 2.0;
     let wall_thickness = 40.0;
+
+    let ground_layers = CollisionLayers::new(GameLayer::Ground, [GameLayer::Player, GameLayer::Enemy]);
+    let wall_layers = CollisionLayers::new(GameLayer::Wall, [GameLayer::Player, GameLayer::Enemy]);
 
     // Room instance marker
     commands.spawn((
@@ -758,6 +963,7 @@ fn spawn_room_geometry(
         Transform::from_xyz(0.0, -half_height, 0.0),
         RigidBody::Static,
         Collider::rectangle(room.width, wall_thickness),
+        ground_layers,
     ));
 
     // Ceiling (with gap if Up exit exists)
@@ -777,6 +983,7 @@ fn spawn_room_geometry(
             Transform::from_xyz(-half_width + side_width / 2.0, half_height, 0.0),
             RigidBody::Static,
             Collider::rectangle(side_width, wall_thickness),
+            wall_layers,
         ));
 
         // Right ceiling
@@ -790,20 +997,24 @@ fn spawn_room_geometry(
             Transform::from_xyz(half_width - side_width / 2.0, half_height, 0.0),
             RigidBody::Static,
             Collider::rectangle(side_width, wall_thickness),
+            wall_layers,
         ));
 
         // Up exit trigger
+        let condition = room.get_exit_condition(Direction::Up);
+        let is_enabled = condition == PortalEnableCondition::AlwaysEnabled;
         let color = if room.boss_room {
-            boss_exit_color
+            if is_enabled { boss_exit_enabled_color } else { boss_exit_disabled_color }
         } else {
-            exit_color
+            if is_enabled { exit_enabled_color } else { exit_disabled_color }
         };
-        commands.spawn((
+        let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Up,
                 target_room_id: None,
             },
             ExitTrigger,
+            PortalCondition::new(condition),
             Sprite {
                 color,
                 custom_size: Some(Vec2::new(gap_width, wall_thickness)),
@@ -814,6 +1025,11 @@ fn spawn_room_geometry(
             Sensor,
             CollisionEventsEnabled,
         ));
+        if is_enabled {
+            exit_cmd.insert(PortalEnabled);
+        } else {
+            exit_cmd.insert(PortalDisabled);
+        }
     } else {
         // Full ceiling
         commands.spawn((
@@ -826,6 +1042,7 @@ fn spawn_room_geometry(
             Transform::from_xyz(0.0, half_height, 0.0),
             RigidBody::Static,
             Collider::rectangle(room.width, wall_thickness),
+            wall_layers,
         ));
     }
 
@@ -845,6 +1062,7 @@ fn spawn_room_geometry(
             Transform::from_xyz(-half_width, half_height - side_height / 2.0, 0.0),
             RigidBody::Static,
             Collider::rectangle(wall_thickness, side_height),
+            wall_layers,
         ));
 
         // Bottom left wall
@@ -858,20 +1076,24 @@ fn spawn_room_geometry(
             Transform::from_xyz(-half_width, -half_height + side_height / 2.0, 0.0),
             RigidBody::Static,
             Collider::rectangle(wall_thickness, side_height),
+            wall_layers,
         ));
 
         // Left exit trigger
+        let condition = room.get_exit_condition(Direction::Left);
+        let is_enabled = condition == PortalEnableCondition::AlwaysEnabled;
         let color = if room.boss_room {
-            boss_exit_color
+            if is_enabled { boss_exit_enabled_color } else { boss_exit_disabled_color }
         } else {
-            exit_color
+            if is_enabled { exit_enabled_color } else { exit_disabled_color }
         };
-        commands.spawn((
+        let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Left,
                 target_room_id: None,
             },
             ExitTrigger,
+            PortalCondition::new(condition),
             Sprite {
                 color,
                 custom_size: Some(Vec2::new(wall_thickness, gap_height)),
@@ -882,6 +1104,11 @@ fn spawn_room_geometry(
             Sensor,
             CollisionEventsEnabled,
         ));
+        if is_enabled {
+            exit_cmd.insert(PortalEnabled);
+        } else {
+            exit_cmd.insert(PortalDisabled);
+        }
     } else {
         commands.spawn((
             Wall,
@@ -893,6 +1120,7 @@ fn spawn_room_geometry(
             Transform::from_xyz(-half_width, 0.0, 0.0),
             RigidBody::Static,
             Collider::rectangle(wall_thickness, room.height),
+            wall_layers,
         ));
     }
 
@@ -912,6 +1140,7 @@ fn spawn_room_geometry(
             Transform::from_xyz(half_width, half_height - side_height / 2.0, 0.0),
             RigidBody::Static,
             Collider::rectangle(wall_thickness, side_height),
+            wall_layers,
         ));
 
         // Bottom right wall
@@ -925,20 +1154,24 @@ fn spawn_room_geometry(
             Transform::from_xyz(half_width, -half_height + side_height / 2.0, 0.0),
             RigidBody::Static,
             Collider::rectangle(wall_thickness, side_height),
+            wall_layers,
         ));
 
         // Right exit trigger
+        let condition = room.get_exit_condition(Direction::Right);
+        let is_enabled = condition == PortalEnableCondition::AlwaysEnabled;
         let color = if room.boss_room {
-            boss_exit_color
+            if is_enabled { boss_exit_enabled_color } else { boss_exit_disabled_color }
         } else {
-            exit_color
+            if is_enabled { exit_enabled_color } else { exit_disabled_color }
         };
-        commands.spawn((
+        let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Right,
                 target_room_id: None,
             },
             ExitTrigger,
+            PortalCondition::new(condition),
             Sprite {
                 color,
                 custom_size: Some(Vec2::new(wall_thickness, gap_height)),
@@ -949,6 +1182,11 @@ fn spawn_room_geometry(
             Sensor,
             CollisionEventsEnabled,
         ));
+        if is_enabled {
+            exit_cmd.insert(PortalEnabled);
+        } else {
+            exit_cmd.insert(PortalDisabled);
+        }
     } else {
         commands.spawn((
             Wall,
@@ -960,24 +1198,28 @@ fn spawn_room_geometry(
             Transform::from_xyz(half_width, 0.0, 0.0),
             RigidBody::Static,
             Collider::rectangle(wall_thickness, room.height),
+            wall_layers,
         ));
     }
 
     // Down exit (in the ground)
     if room.exits.contains(&Direction::Down) {
         let gap_width = 100.0;
+        let condition = room.get_exit_condition(Direction::Down);
+        let is_enabled = condition == PortalEnableCondition::AlwaysEnabled;
         let color = if room.boss_room {
-            boss_exit_color
+            if is_enabled { boss_exit_enabled_color } else { boss_exit_disabled_color }
         } else {
-            exit_color
+            if is_enabled { exit_enabled_color } else { exit_disabled_color }
         };
 
-        commands.spawn((
+        let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Down,
                 target_room_id: None,
             },
             ExitTrigger,
+            PortalCondition::new(condition),
             Sprite {
                 color,
                 custom_size: Some(Vec2::new(gap_width, wall_thickness / 2.0)),
@@ -988,6 +1230,11 @@ fn spawn_room_geometry(
             Sensor,
             CollisionEventsEnabled,
         ));
+        if is_enabled {
+            exit_cmd.insert(PortalEnabled);
+        } else {
+            exit_cmd.insert(PortalDisabled);
+        }
     }
 
     // Add some platforms for gameplay variety
@@ -1011,6 +1258,7 @@ fn spawn_room_geometry(
             Transform::from_xyz(pos.x, pos.y, 0.0),
             RigidBody::Static,
             Collider::rectangle(120.0, 20.0),
+            ground_layers,
         ));
     }
 }
@@ -1018,13 +1266,20 @@ fn spawn_room_geometry(
 fn get_spawn_position(room: &RoomData, entry_direction: Direction) -> Vec2 {
     let half_width = room.width / 2.0;
     let half_height = room.height / 2.0;
-    let offset = 60.0; // Distance from wall
+    // Distance from wall/exit sensor - must be larger than wall_thickness (40) + sensor half-height
+    // to avoid spawning inside exit sensors and triggering immediate transitions
+    let wall_offset = 80.0;
+    let ground_offset = 80.0; // Height above ground level
 
     match entry_direction {
-        Direction::Left => Vec2::new(-half_width + offset, -half_height + 80.0),
-        Direction::Right => Vec2::new(half_width - offset, -half_height + 80.0),
-        Direction::Up => Vec2::new(0.0, half_height - offset),
-        Direction::Down => Vec2::new(0.0, -half_height + 80.0),
+        // Spawn near left wall, on ground level (away from Left exit which is at y=0)
+        Direction::Left => Vec2::new(-half_width + wall_offset, -half_height + ground_offset),
+        // Spawn near right wall, on ground level (away from Right exit which is at y=0)
+        Direction::Right => Vec2::new(half_width - wall_offset, -half_height + ground_offset),
+        // Spawn below ceiling, far enough from Up exit sensor
+        Direction::Up => Vec2::new(0.0, half_height - wall_offset),
+        // Spawn above ground, Down exit is below ground so no overlap
+        Direction::Down => Vec2::new(0.0, -half_height + ground_offset),
     }
 }
 
@@ -1055,14 +1310,22 @@ fn cleanup_room(
 
 fn detect_exit_collision(
     mut collision_events: MessageReader<CollisionStart>,
-    exit_query: Query<&RoomExit>,
+    exit_query: Query<(&RoomExit, Option<&PortalEnabled>)>,
     player_query: Query<Entity, With<Player>>,
     arena_lock_query: Query<Entity, With<ArenaLock>>,
+    cooldown: Res<TransitionCooldown>,
     mut exit_events: MessageWriter<ExitRoomEvent>,
 ) {
     // If arena is locked (boss fight in progress), don't allow exits
     if !arena_lock_query.is_empty() {
         // Consume events without processing
+        for _ in collision_events.read() {}
+        return;
+    }
+
+    // Check cooldown before allowing any transitions
+    if !cooldown.can_transition() {
+        // Consume events without processing during cooldown
         for _ in collision_events.read() {}
         return;
     }
@@ -1084,7 +1347,14 @@ fn detect_exit_collision(
             continue;
         }
 
-        if let Ok(exit) = exit_query.get(exit_entity) {
+        if let Ok((exit, portal_enabled)) = exit_query.get(exit_entity) {
+            // Only react to exits marked as PortalEnabled
+            if portal_enabled.is_none() {
+                info!("[TRANSITION] Ignoring exit {:?} - not PortalEnabled", exit.direction);
+                continue;
+            }
+
+            info!("[TRANSITION] Player triggered exit {:?}", exit.direction);
             exit_events.write(ExitRoomEvent {
                 direction: exit.direction,
             });
@@ -1112,23 +1382,99 @@ fn process_room_transitions(
     mut next_state: ResMut<NextState<RunState>>,
 ) {
     for event in exit_events.read() {
+        info!("[TRANSITION] Processing exit event: {:?}", event.direction);
+
         // Find a room that has an exit in the opposite direction (so we can enter it)
         let entry_dir = opposite_direction(event.direction);
 
         if let Some(target_room) =
             find_room_with_entry(&registry, entry_dir, &room_graph.rooms_cleared)
         {
+            info!("[TRANSITION] Found target room '{}' with entry direction {:?}", target_room, entry_dir);
             room_graph.pending_transition = Some(RoomTransition {
                 from_room: room_graph.current_room_id.clone(),
-                to_room: target_room,
+                to_room: target_room.clone(),
                 entry_direction: entry_dir,
             });
+            info!("[TRANSITION] pending_transition set: {:?}", room_graph.pending_transition);
 
             // Trigger room change by exiting and re-entering Room state
             // This will trigger OnExit(Room) -> cleanup -> OnEnter(Room) -> spawn
             next_state.set(RunState::Arena);
+            info!("[TRANSITION] RunState changed to Arena");
             // After a brief moment, we'll transition back to Room
             // For now, we go back to Arena and let the player choose again
+        } else {
+            info!("[TRANSITION] No target room found for entry direction {:?}", entry_dir);
+        }
+    }
+}
+
+// ============================================================================
+// Portal Condition Evaluation
+// ============================================================================
+
+/// Evaluates portal conditions and enables/disables portals accordingly.
+/// This system runs every frame to check if conditions have been met.
+fn evaluate_portal_conditions(
+    mut commands: Commands,
+    enemy_query: Query<Entity, With<Enemy>>,
+    room_instance_query: Query<&RoomInstance>,
+    mut portal_query: Query<
+        (Entity, &PortalCondition, &RoomExit, &mut Sprite, Option<&PortalDisabled>),
+        Without<PortalEnabled>,
+    >,
+) {
+    // Only evaluate if we're in a room (have a room instance)
+    let Some(room_instance) = room_instance_query.iter().next() else {
+        return;
+    };
+
+    // Count enemies in the room
+    let enemy_count = enemy_query.iter().count();
+
+    // Define colors for portals (should match spawn_room_geometry)
+    let exit_enabled_color = Color::srgb(0.3, 0.7, 0.4);
+    let boss_exit_enabled_color = Color::srgb(0.7, 0.3, 0.3);
+
+    for (entity, condition, exit, mut sprite, is_disabled) in portal_query.iter_mut() {
+        // Skip if already enabled
+        if is_disabled.is_none() {
+            continue;
+        }
+
+        let should_enable = evaluate_condition(&condition.condition, enemy_count);
+
+        if should_enable {
+            // Enable the portal
+            commands.entity(entity).remove::<PortalDisabled>();
+            commands.entity(entity).insert(PortalEnabled);
+
+            // Update visual
+            sprite.color = if room_instance.boss_room {
+                boss_exit_enabled_color
+            } else {
+                exit_enabled_color
+            };
+
+            info!(
+                "[PORTAL] Enabled exit {:?} (condition: {:?}, enemies remaining: {})",
+                exit.direction, condition.condition, enemy_count
+            );
+        }
+    }
+}
+
+/// Recursively evaluates a portal enable condition.
+fn evaluate_condition(condition: &PortalEnableCondition, enemy_count: usize) -> bool {
+    match condition {
+        PortalEnableCondition::AlwaysEnabled => true,
+        PortalEnableCondition::NoEnemiesRemaining => enemy_count == 0,
+        PortalEnableCondition::All(conditions) => {
+            conditions.iter().all(|c| evaluate_condition(c, enemy_count))
+        }
+        PortalEnableCondition::Any(conditions) => {
+            conditions.iter().any(|c| evaluate_condition(c, enemy_count))
         }
     }
 }
