@@ -24,6 +24,10 @@ pub enum GameLayer {
     Enemy,
     /// Sensors (portals, triggers) - should not block movement
     Sensor,
+    /// Player hitboxes (damage enemies)
+    PlayerHitbox,
+    /// Enemy hitboxes (damage player)
+    EnemyHitbox,
 }
 
 #[derive(Component, Debug)]
@@ -95,6 +99,31 @@ impl Default for MovementTuning {
             wall_jump_vertical: 600.0,
             wall_jump_lock_time: 0.15,
         }
+    }
+}
+
+impl MovementTuning {
+    /// Calculate the maximum height reachable from a single ground jump.
+    /// Uses physics formula: h = v² / (2g)
+    pub fn single_jump_height(&self) -> f32 {
+        self.jump_velocity * self.jump_velocity / (2.0 * self.gravity)
+    }
+
+    /// Calculate the maximum height reachable with all available jumps.
+    /// Each air jump adds additional height (assuming optimal timing at apex).
+    /// This is a conservative estimate - actual height may vary with timing.
+    pub fn max_reachable_height(&self) -> f32 {
+        let base_height = self.single_jump_height();
+        // Air jumps from apex add full jump height each
+        // (1 ground jump + max_air_jumps air jumps)
+        base_height * (1.0 + self.max_air_jumps as f32)
+    }
+
+    /// Calculate max reachable height with a safety margin for comfortable platforming.
+    /// The margin accounts for imperfect jump timing and player collision box.
+    pub fn safe_reachable_height(&self) -> f32 {
+        // Use 80% of theoretical max for safe/comfortable gameplay
+        self.max_reachable_height() * 0.8
     }
 }
 
@@ -189,7 +218,7 @@ fn spawn_player(mut commands: Commands, tuning: Res<MovementTuning>) {
             GravityScale(0.0), // We handle gravity manually for more control
             Friction::new(0.0),
             CollisionEventsEnabled,
-            CollisionLayers::new(GameLayer::Player, [GameLayer::Ground, GameLayer::Wall]),
+            CollisionLayers::new(GameLayer::Player, [GameLayer::Ground, GameLayer::Wall, GameLayer::EnemyHitbox]),
         ),
     ));
 }

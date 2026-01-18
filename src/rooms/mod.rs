@@ -9,7 +9,7 @@ use crate::combat::{
 };
 use crate::content::Direction;
 use crate::core::{DifficultyScaling, RunConfig, RunState};
-use crate::movement::{GameLayer, Ground, Player, Wall};
+use crate::movement::{GameLayer, Ground, MovementTuning, Player, Wall};
 
 // ============================================================================
 // Components
@@ -66,6 +66,20 @@ pub struct PortalEnabled;
 /// Marker indicating a portal/exit is disabled and cannot be used for transitions
 #[derive(Component, Debug, Default)]
 pub struct PortalDisabled;
+
+/// Marker for the solid floor/platform under a portal that allows the player to stand on it
+#[derive(Component, Debug)]
+pub struct PortalFloor;
+
+/// Tracks that the player is currently within a portal's interaction zone
+#[derive(Component, Debug)]
+pub struct PlayerInPortalZone {
+    pub portal_entity: Entity,
+}
+
+/// Marker for the "Press [E] to enter" tooltip UI
+#[derive(Component, Debug)]
+pub struct PortalTooltipUI;
 
 /// Condition that determines when a portal/exit becomes enabled
 #[derive(Debug, Clone, PartialEq)]
@@ -296,9 +310,11 @@ impl Plugin for RoomsPlugin {
                 Update,
                 (
                     evaluate_portal_conditions,
-                    detect_exit_collision,
+                    track_player_portal_zone,
+                    confirm_portal_entry,
                     process_room_transitions,
                     handle_boss_defeated,
+                    update_portal_tooltip,
                 )
                     .chain()
                     .run_if(in_state(RunState::Room)),
@@ -793,13 +809,14 @@ fn spawn_current_room(
     boss_config: Res<BossConfig>,
     mut boss_state: ResMut<BossEncounterState>,
     enemy_tuning: Res<EnemyTuning>,
+    movement_tuning: Res<MovementTuning>,
     run_config: Res<RunConfig>,
     difficulty: Res<DifficultyScaling>,
     mut player_query: Query<&mut Transform, With<Player>>,
 ) {
     let Some(transition) = &room_graph.pending_transition else {
         // No transition pending, spawn default room
-        spawn_room_geometry(&mut commands, &RoomData::default(), None);
+        spawn_room_geometry(&mut commands, &RoomData::default(), None, &movement_tuning);
         return;
     };
 
@@ -818,7 +835,7 @@ fn spawn_current_room(
         room_data.boss_room || boss_state.should_spawn_boss(&boss_config, rng_roll);
 
     // Spawn room geometry
-    spawn_room_geometry(&mut commands, &room_data, Some(transition.entry_direction));
+    spawn_room_geometry(&mut commands, &room_data, Some(transition.entry_direction), &movement_tuning);
 
     // Spawn enemies or boss with difficulty scaling
     if spawn_boss_encounter {
@@ -927,6 +944,7 @@ fn spawn_room_geometry(
     commands: &mut Commands,
     room: &RoomData,
     _entry_direction: Option<Direction>,
+    movement_tuning: &MovementTuning,
 ) {
     let wall_color = Color::srgb(0.3, 0.3, 0.4);
     let ground_color = Color::srgb(0.4, 0.5, 0.4);
@@ -938,6 +956,9 @@ fn spawn_room_geometry(
     let half_width = room.width / 2.0;
     let half_height = room.height / 2.0;
     let wall_thickness = 40.0;
+
+    // Calculate safe reachable height for platform placement
+    let safe_jump_height = movement_tuning.safe_reachable_height();
 
     let ground_layers = CollisionLayers::new(GameLayer::Ground, [GameLayer::Player, GameLayer::Enemy]);
     let wall_layers = CollisionLayers::new(GameLayer::Wall, [GameLayer::Player, GameLayer::Enemy]);
@@ -952,19 +973,54 @@ fn spawn_room_geometry(
         Visibility::default(),
     ));
 
-    // Ground
-    commands.spawn((
-        Ground,
-        Sprite {
-            color: ground_color,
-            custom_size: Some(Vec2::new(room.width, wall_thickness)),
-            ..default()
-        },
-        Transform::from_xyz(0.0, -half_height, 0.0),
-        RigidBody::Static,
-        Collider::rectangle(room.width, wall_thickness),
-        ground_layers,
-    ));
+    // Ground (with gap if Down exit exists)
+    if room.exits.contains(&Direction::Down) {
+        // Split ground with exit gap
+        let gap_width = 100.0;
+        let side_width = (room.width - gap_width) / 2.0;
+
+        // Left ground
+        commands.spawn((
+            Ground,
+            Sprite {
+                color: ground_color,
+                custom_size: Some(Vec2::new(side_width, wall_thickness)),
+                ..default()
+            },
+            Transform::from_xyz(-half_width + side_width / 2.0, -half_height, 0.0),
+            RigidBody::Static,
+            Collider::rectangle(side_width, wall_thickness),
+            ground_layers,
+        ));
+
+        // Right ground
+        commands.spawn((
+            Ground,
+            Sprite {
+                color: ground_color,
+                custom_size: Some(Vec2::new(side_width, wall_thickness)),
+                ..default()
+            },
+            Transform::from_xyz(half_width - side_width / 2.0, -half_height, 0.0),
+            RigidBody::Static,
+            Collider::rectangle(side_width, wall_thickness),
+            ground_layers,
+        ));
+    } else {
+        // Full ground
+        commands.spawn((
+            Ground,
+            Sprite {
+                color: ground_color,
+                custom_size: Some(Vec2::new(room.width, wall_thickness)),
+                ..default()
+            },
+            Transform::from_xyz(0.0, -half_height, 0.0),
+            RigidBody::Static,
+            Collider::rectangle(room.width, wall_thickness),
+            ground_layers,
+        ));
+    }
 
     // Ceiling (with gap if Up exit exists)
     if room.exits.contains(&Direction::Up) {
@@ -1008,6 +1064,57 @@ fn spawn_room_geometry(
         } else {
             if is_enabled { exit_enabled_color } else { exit_disabled_color }
         };
+
+        // Solid floor platform below the Up exit so player can stand on it
+        let portal_floor_color = Color::srgb(0.45, 0.4, 0.35);
+        let platform_height = 20.0;
+        let up_exit_platform_y = half_height - wall_thickness - platform_height / 2.0;
+
+        // Calculate ground level and check if we need stepping stones
+        let ground_level = -half_height + wall_thickness / 2.0;
+        let height_to_climb = up_exit_platform_y - ground_level;
+
+        // Add stepping stone platforms if the exit is too high to reach
+        if height_to_climb > safe_jump_height {
+            let step_platform_color = Color::srgb(0.4, 0.35, 0.3);
+            let num_steps = (height_to_climb / safe_jump_height).ceil() as i32;
+            let step_height = height_to_climb / num_steps as f32;
+
+            // Alternate platforms left and right for interesting traversal
+            for i in 1..num_steps {
+                let step_y = ground_level + step_height * i as f32;
+                let step_x = if i % 2 == 1 { -80.0 } else { 80.0 };
+
+                commands.spawn((
+                    Ground,
+                    Sprite {
+                        color: step_platform_color,
+                        custom_size: Some(Vec2::new(100.0, platform_height)),
+                        ..default()
+                    },
+                    Transform::from_xyz(step_x, step_y, 0.0),
+                    RigidBody::Static,
+                    Collider::rectangle(100.0, platform_height),
+                    ground_layers,
+                ));
+            }
+        }
+
+        // Main Up exit platform
+        commands.spawn((
+            PortalFloor,
+            Ground,
+            Sprite {
+                color: portal_floor_color,
+                custom_size: Some(Vec2::new(gap_width + 40.0, platform_height)),
+                ..default()
+            },
+            Transform::from_xyz(0.0, up_exit_platform_y, 0.0),
+            RigidBody::Static,
+            Collider::rectangle(gap_width + 40.0, platform_height),
+            ground_layers,
+        ));
+
         let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Up,
@@ -1087,6 +1194,60 @@ fn spawn_room_geometry(
         } else {
             if is_enabled { exit_enabled_color } else { exit_disabled_color }
         };
+
+        // Solid floor platform at the bottom of the Left exit so player can stand on it
+        let portal_floor_color = Color::srgb(0.45, 0.4, 0.35);
+        let platform_height = 20.0;
+        let platform_width = wall_thickness + 60.0; // Extends into the room
+        let left_exit_platform_y = -gap_height / 2.0 - platform_height / 2.0;
+
+        // Calculate ground level and check if we need stepping stones
+        let ground_level = -half_height + wall_thickness / 2.0;
+        let height_to_climb = left_exit_platform_y - ground_level;
+
+        // Add stepping stone platforms if the exit is too high to reach
+        if height_to_climb > safe_jump_height {
+            let step_platform_color = Color::srgb(0.4, 0.35, 0.3);
+            let num_steps = (height_to_climb / safe_jump_height).ceil() as i32;
+            let step_height = height_to_climb / num_steps as f32;
+
+            // Stagger platforms leading to the left exit
+            for i in 1..num_steps {
+                let step_y = ground_level + step_height * i as f32;
+                // Place steps progressively closer to the left wall
+                let step_x = -half_width + 100.0 + (i as f32 * 30.0);
+
+                commands.spawn((
+                    Ground,
+                    Sprite {
+                        color: step_platform_color,
+                        custom_size: Some(Vec2::new(100.0, platform_height)),
+                        ..default()
+                    },
+                    Transform::from_xyz(step_x, step_y, 0.0),
+                    RigidBody::Static,
+                    Collider::rectangle(100.0, platform_height),
+                    ground_layers,
+                ));
+            }
+        }
+
+        // Main Left exit platform
+        commands.spawn((
+            PortalFloor,
+            Ground,
+            Sprite {
+                color: portal_floor_color,
+                custom_size: Some(Vec2::new(platform_width, platform_height)),
+                ..default()
+            },
+            // Position at bottom of the gap, extending into the room
+            Transform::from_xyz(-half_width + platform_width / 2.0 - wall_thickness / 2.0, left_exit_platform_y, 0.0),
+            RigidBody::Static,
+            Collider::rectangle(platform_width, platform_height),
+            ground_layers,
+        ));
+
         let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Left,
@@ -1165,6 +1326,60 @@ fn spawn_room_geometry(
         } else {
             if is_enabled { exit_enabled_color } else { exit_disabled_color }
         };
+
+        // Solid floor platform at the bottom of the Right exit so player can stand on it
+        let portal_floor_color = Color::srgb(0.45, 0.4, 0.35);
+        let platform_height = 20.0;
+        let platform_width = wall_thickness + 60.0; // Extends into the room
+        let right_exit_platform_y = -gap_height / 2.0 - platform_height / 2.0;
+
+        // Calculate ground level and check if we need stepping stones
+        let ground_level = -half_height + wall_thickness / 2.0;
+        let height_to_climb = right_exit_platform_y - ground_level;
+
+        // Add stepping stone platforms if the exit is too high to reach
+        if height_to_climb > safe_jump_height {
+            let step_platform_color = Color::srgb(0.4, 0.35, 0.3);
+            let num_steps = (height_to_climb / safe_jump_height).ceil() as i32;
+            let step_height = height_to_climb / num_steps as f32;
+
+            // Stagger platforms leading to the right exit
+            for i in 1..num_steps {
+                let step_y = ground_level + step_height * i as f32;
+                // Place steps progressively closer to the right wall
+                let step_x = half_width - 100.0 - (i as f32 * 30.0);
+
+                commands.spawn((
+                    Ground,
+                    Sprite {
+                        color: step_platform_color,
+                        custom_size: Some(Vec2::new(100.0, platform_height)),
+                        ..default()
+                    },
+                    Transform::from_xyz(step_x, step_y, 0.0),
+                    RigidBody::Static,
+                    Collider::rectangle(100.0, platform_height),
+                    ground_layers,
+                ));
+            }
+        }
+
+        // Main Right exit platform
+        commands.spawn((
+            PortalFloor,
+            Ground,
+            Sprite {
+                color: portal_floor_color,
+                custom_size: Some(Vec2::new(platform_width, platform_height)),
+                ..default()
+            },
+            // Position at bottom of the gap, extending into the room
+            Transform::from_xyz(half_width - platform_width / 2.0 + wall_thickness / 2.0, right_exit_platform_y, 0.0),
+            RigidBody::Static,
+            Collider::rectangle(platform_width, platform_height),
+            ground_layers,
+        ));
+
         let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Right,
@@ -1202,7 +1417,7 @@ fn spawn_room_geometry(
         ));
     }
 
-    // Down exit (in the ground)
+    // Down exit (in the ground gap)
     if room.exits.contains(&Direction::Down) {
         let gap_width = 100.0;
         let condition = room.get_exit_condition(Direction::Down);
@@ -1213,6 +1428,27 @@ fn spawn_room_geometry(
             if is_enabled { exit_enabled_color } else { exit_disabled_color }
         };
 
+        // Add a visible floor/bridge over the Down exit that player can stand on
+        // This bridge is slightly below ground level so player can walk onto it
+        let portal_floor_color = Color::srgb(0.45, 0.4, 0.35);
+        let platform_height = 20.0;
+        commands.spawn((
+            PortalFloor,
+            Ground,
+            Sprite {
+                color: portal_floor_color,
+                custom_size: Some(Vec2::new(gap_width, platform_height)),
+                ..default()
+            },
+            // Position at ground level within the gap
+            Transform::from_xyz(0.0, -half_height, 0.0),
+            RigidBody::Static,
+            Collider::rectangle(gap_width, platform_height),
+            ground_layers,
+        ));
+
+        // The Down exit sensor is below the bridge platform
+        // When player presses E, they'll descend through
         let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Down,
@@ -1225,8 +1461,9 @@ fn spawn_room_geometry(
                 custom_size: Some(Vec2::new(gap_width, wall_thickness / 2.0)),
                 ..default()
             },
-            Transform::from_xyz(0.0, -half_height - wall_thickness / 4.0, 0.5),
-            Collider::rectangle(gap_width, wall_thickness / 2.0),
+            // Position sensor at ground level so player's feet touch it while standing on the bridge
+            Transform::from_xyz(0.0, -half_height + platform_height / 2.0 + 10.0, 0.5),
+            Collider::rectangle(gap_width, wall_thickness),
             Sensor,
             CollisionEventsEnabled,
         ));
@@ -1294,12 +1531,20 @@ fn cleanup_room(
             With<Wall>,
             With<Enemy>,
             With<ArenaLock>,
+            With<PortalFloor>,
+            With<PortalTooltipUI>,
         )>,
     >,
+    mut player_query: Query<Entity, With<Player>>,
     mut room_graph: ResMut<RoomGraph>,
 ) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
+    }
+
+    // Remove PlayerInPortalZone from player when leaving room
+    for player_entity in &mut player_query {
+        commands.entity(player_entity).remove::<PlayerInPortalZone>();
     }
 
     // Clear pending transition after room is cleaned up
@@ -1308,33 +1553,33 @@ fn cleanup_room(
     }
 }
 
-fn detect_exit_collision(
-    mut collision_events: MessageReader<CollisionStart>,
-    exit_query: Query<(&RoomExit, Option<&PortalEnabled>)>,
+/// Tracks when the player enters/exits portal interaction zones.
+/// Adds PlayerInPortalZone to player when touching an enabled portal sensor.
+fn track_player_portal_zone(
+    mut commands: Commands,
+    mut collision_start_events: MessageReader<CollisionStart>,
+    mut collision_end_events: MessageReader<CollisionEnd>,
+    exit_query: Query<(Entity, &RoomExit, Option<&PortalEnabled>)>,
     player_query: Query<Entity, With<Player>>,
+    player_zone_query: Query<&PlayerInPortalZone, With<Player>>,
     arena_lock_query: Query<Entity, With<ArenaLock>>,
-    cooldown: Res<TransitionCooldown>,
-    mut exit_events: MessageWriter<ExitRoomEvent>,
 ) {
-    // If arena is locked (boss fight in progress), don't allow exits
-    if !arena_lock_query.is_empty() {
-        // Consume events without processing
-        for _ in collision_events.read() {}
-        return;
-    }
-
-    // Check cooldown before allowing any transitions
-    if !cooldown.can_transition() {
-        // Consume events without processing during cooldown
-        for _ in collision_events.read() {}
-        return;
-    }
-
     let Some(player_entity) = player_query.iter().next() else {
+        // Consume events if no player
+        for _ in collision_start_events.read() {}
+        for _ in collision_end_events.read() {}
         return;
     };
 
-    for event in collision_events.read() {
+    // If arena is locked (boss fight), don't track portal zones
+    if !arena_lock_query.is_empty() {
+        for _ in collision_start_events.read() {}
+        for _ in collision_end_events.read() {}
+        return;
+    }
+
+    // Handle collision starts - player enters portal zone
+    for event in collision_start_events.read() {
         let (exit_entity, other) = if exit_query.get(event.collider1).is_ok() {
             (event.collider1, event.collider2)
         } else if exit_query.get(event.collider2).is_ok() {
@@ -1347,19 +1592,154 @@ fn detect_exit_collision(
             continue;
         }
 
-        if let Ok((exit, portal_enabled)) = exit_query.get(exit_entity) {
-            // Only react to exits marked as PortalEnabled
-            if portal_enabled.is_none() {
-                info!("[TRANSITION] Ignoring exit {:?} - not PortalEnabled", exit.direction);
-                continue;
+        if let Ok((portal_entity, exit, portal_enabled)) = exit_query.get(exit_entity) {
+            // Only track enabled portals
+            if portal_enabled.is_some() {
+                info!("[PORTAL] Player entered portal zone {:?}", exit.direction);
+                commands.entity(player_entity).insert(PlayerInPortalZone {
+                    portal_entity,
+                });
             }
+        }
+    }
 
-            info!("[TRANSITION] Player triggered exit {:?}", exit.direction);
+    // Handle collision ends - player exits portal zone
+    for event in collision_end_events.read() {
+        let (exit_entity, other) = if exit_query.get(event.collider1).is_ok() {
+            (event.collider1, event.collider2)
+        } else if exit_query.get(event.collider2).is_ok() {
+            (event.collider2, event.collider1)
+        } else {
+            continue;
+        };
+
+        if other != player_entity {
+            continue;
+        }
+
+        // Check if player is leaving the portal they're currently in
+        if let Ok(player_zone) = player_zone_query.get(player_entity) {
+            if player_zone.portal_entity == exit_entity {
+                info!("[PORTAL] Player exited portal zone");
+                commands.entity(player_entity).remove::<PlayerInPortalZone>();
+            }
+        }
+    }
+}
+
+/// Confirms portal entry when player presses E while in a portal zone.
+fn confirm_portal_entry(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    player_query: Query<&PlayerInPortalZone, With<Player>>,
+    exit_query: Query<(&RoomExit, Option<&PortalEnabled>)>,
+    cooldown: Res<TransitionCooldown>,
+    mut exit_events: MessageWriter<ExitRoomEvent>,
+) {
+    // Check if player pressed E
+    if !keyboard.just_pressed(KeyCode::KeyE) {
+        return;
+    }
+
+    // Check cooldown
+    if !cooldown.can_transition() {
+        return;
+    }
+
+    // Check if player is in a portal zone
+    let Ok(player_zone) = player_query.single() else {
+        return;
+    };
+
+    // Verify the portal is still enabled and get its direction
+    if let Ok((exit, portal_enabled)) = exit_query.get(player_zone.portal_entity) {
+        if portal_enabled.is_some() {
+            info!("[TRANSITION] Player confirmed exit {:?} with E key", exit.direction);
             exit_events.write(ExitRoomEvent {
                 direction: exit.direction,
             });
         }
     }
+}
+
+/// Updates the portal tooltip UI - shows "Press [E] to enter" when player is in portal zone.
+fn update_portal_tooltip(
+    mut commands: Commands,
+    player_query: Query<Option<&PlayerInPortalZone>, With<Player>>,
+    exit_query: Query<(&RoomExit, Option<&PortalEnabled>)>,
+    existing_tooltip: Query<Entity, With<PortalTooltipUI>>,
+) {
+    // Check if player is in a portal zone
+    let Ok(maybe_zone) = player_query.single() else {
+        // No player, cleanup any tooltip
+        for entity in &existing_tooltip {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+
+    match maybe_zone {
+        Some(player_zone) => {
+            // Player is in a portal zone - check if portal is enabled
+            let portal_enabled = exit_query
+                .get(player_zone.portal_entity)
+                .map(|(_, enabled)| enabled.is_some())
+                .unwrap_or(false);
+
+            if portal_enabled {
+                // Show tooltip if not already shown
+                if existing_tooltip.is_empty() {
+                    spawn_portal_tooltip(&mut commands);
+                }
+            } else {
+                // Portal not enabled, hide tooltip
+                for entity in &existing_tooltip {
+                    commands.entity(entity).despawn();
+                }
+            }
+        }
+        None => {
+            // Player not in portal zone, hide tooltip
+            for entity in &existing_tooltip {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+fn spawn_portal_tooltip(commands: &mut Commands) {
+    commands
+        .spawn((
+            PortalTooltipUI,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(120.0),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+        ))
+        .with_children(|parent| {
+            parent
+                .spawn((
+                    Node {
+                        padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+                        border: UiRect::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.9)),
+                    BorderColor::all(Color::srgb(0.3, 0.6, 0.4)),
+                ))
+                .with_child((
+                    Text::new("Press [E] to enter"),
+                    TextFont {
+                        font_size: 20.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.3, 0.9, 0.4)),
+                ));
+        });
 }
 
 fn handle_boss_defeated(

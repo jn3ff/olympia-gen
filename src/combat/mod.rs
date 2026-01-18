@@ -763,7 +763,7 @@ impl EnemyBundle {
             rigid_body: RigidBody::Dynamic,
             collider: Collider::rectangle(size.x, size.y),
             collision_events: CollisionEventsEnabled,
-            collision_layers: CollisionLayers::new(GameLayer::Enemy, [GameLayer::Ground, GameLayer::Wall]),
+            collision_layers: CollisionLayers::new(GameLayer::Enemy, [GameLayer::Ground, GameLayer::Wall, GameLayer::PlayerHitbox]),
             velocity: LinearVelocity::default(),
             damping: LinearDamping(5.0), // High damping to quickly decay knockback velocity
             locked_axes: LockedAxes::ROTATION_LOCKED,
@@ -835,7 +835,7 @@ pub fn spawn_boss_scaled(
                 RigidBody::Dynamic,
                 Collider::rectangle(size.x, size.y),
                 CollisionEventsEnabled,
-                CollisionLayers::new(GameLayer::Enemy, [GameLayer::Ground, GameLayer::Wall]),
+                CollisionLayers::new(GameLayer::Enemy, [GameLayer::Ground, GameLayer::Wall, GameLayer::PlayerHitbox]),
                 LinearVelocity::default(),
                 LinearDamping(3.0), // Moderate damping for bosses
                 LockedAxes::ROTATION_LOCKED,
@@ -1012,6 +1012,7 @@ fn process_player_attacks(
                 Collider::rectangle(hitbox_size.x, hitbox_size.y),
                 Sensor,
                 CollisionEventsEnabled,
+                CollisionLayers::new(GameLayer::PlayerHitbox, [GameLayer::Enemy]),
             ));
         }
     }
@@ -1350,6 +1351,7 @@ fn process_enemy_attacks(
                 Collider::rectangle(hitbox_size.x, hitbox_size.y),
                 Sensor,
                 CollisionEventsEnabled,
+                CollisionLayers::new(GameLayer::EnemyHitbox, [GameLayer::Player]),
             ));
         }
     }
@@ -1419,6 +1421,7 @@ fn process_boss_attacks(
                 Collider::rectangle(size.x, size.y),
                 Sensor,
                 CollisionEventsEnabled,
+                CollisionLayers::new(GameLayer::EnemyHitbox, [GameLayer::Player]),
             ));
         }
     }
@@ -1427,8 +1430,8 @@ fn process_boss_attacks(
 fn detect_hitbox_collisions(
     mut collision_events: MessageReader<CollisionStart>,
     mut damage_events: MessageWriter<DamageEvent>,
-    mut hitbox_query: Query<(&mut Hitbox, &Team)>,
-    target_query: Query<(Entity, &Team, &Invulnerable), With<Combatant>>,
+    mut hitbox_query: Query<(&mut Hitbox, &Team, &Transform)>,
+    target_query: Query<(Entity, &Team, &Invulnerable, &Transform), With<Combatant>>,
 ) {
     for event in collision_events.read() {
         let pairs = [
@@ -1437,8 +1440,8 @@ fn detect_hitbox_collisions(
         ];
 
         for (hitbox_entity, target_entity) in pairs {
-            if let Ok((mut hitbox, hitbox_team)) = hitbox_query.get_mut(hitbox_entity) {
-                if let Ok((target, target_team, invuln)) = target_query.get(target_entity) {
+            if let Ok((mut hitbox, hitbox_team, hitbox_transform)) = hitbox_query.get_mut(hitbox_entity) {
+                if let Ok((target, target_team, invuln, target_transform)) = target_query.get(target_entity) {
                     if hitbox_team == target_team {
                         continue;
                     }
@@ -1457,7 +1460,16 @@ fn detect_hitbox_collisions(
 
                     hitbox.hit_entities.push(target);
 
-                    let knockback_dir = Vec2::X;
+                    // Calculate knockback direction from hitbox to target
+                    let hitbox_pos = hitbox_transform.translation.truncate();
+                    let target_pos = target_transform.translation.truncate();
+                    let knockback_dir = (target_pos - hitbox_pos).normalize_or_zero();
+                    // If direction is zero (same position), default to pushing right
+                    let knockback_dir = if knockback_dir == Vec2::ZERO {
+                        Vec2::X
+                    } else {
+                        knockback_dir
+                    };
 
                     damage_events.write(DamageEvent {
                         source: hitbox.owner,
