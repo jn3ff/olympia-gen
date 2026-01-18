@@ -1,0 +1,17 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "encounter_basic",
+      description: "Standard combat mix.",
+      enemy_pool_id: "enemy_pool_basic",
+      elite_pool_id: "elite_pool_basic",
+    ),
+    (
+      id: "encounter_light",
+      description: "Traversal-focused with light combat.",
+      enemy_pool_id: "enemy_pool_light",
+      elite_pool_id: "elite_pool_basic",
+    ),
+  ],
+)

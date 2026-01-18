@@ -1,0 +1,25 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "biome_default",
+      name: "Arena",
+      movement_mods: (
+        gravity_mult: 1.0,
+        dash_cooldown_mult: 1.0,
+        jump_height_mult: 1.0,
+      ),
+      tags: ["neutral"],
+    ),
+    (
+      id: "biome_undersea",
+      name: "Undersea",
+      movement_mods: (
+        gravity_mult: 0.8,
+        dash_cooldown_mult: 1.2,
+        jump_height_mult: 0.9,
+      ),
+      tags: ["water"],
+    ),
+  ],
+)

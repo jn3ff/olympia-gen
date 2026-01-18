@@ -1,0 +1,57 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "tree_ares",
+      name: "War Path",
+      god_id: "ares",
+      nodes: [
+        (
+          id: "node_ares_01",
+          parent_id: None,
+          reward_id: "blessing_ares_01",
+          tier: 1,
+        ),
+      ],
+    ),
+    (
+      id: "tree_demeter",
+      name: "Winter Grove",
+      god_id: "demeter",
+      nodes: [
+        (
+          id: "node_demeter_01",
+          parent_id: None,
+          reward_id: "blessing_demeter_01",
+          tier: 1,
+        ),
+      ],
+    ),
+    (
+      id: "tree_poseidon",
+      name: "Sea Song",
+      god_id: "poseidon",
+      nodes: [
+        (
+          id: "node_poseidon_01",
+          parent_id: None,
+          reward_id: "blessing_poseidon_01",
+          tier: 1,
+        ),
+      ],
+    ),
+    (
+      id: "tree_zeus",
+      name: "Sky Crown",
+      god_id: "zeus",
+      nodes: [
+        (
+          id: "node_zeus_01",
+          parent_id: None,
+          reward_id: "blessing_zeus_01",
+          tier: 1,
+        ),
+      ],
+    ),
+  ],
+)

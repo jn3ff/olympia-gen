@@ -1,0 +1,33 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "event_ares_warpath",
+      name: "Trial of War",
+      kind: CombatEncounter,
+      description: "Ares demands a decisive victory.",
+      reward_tags: ["ares"],
+    ),
+    (
+      id: "event_demeter_winter",
+      name: "Winter's Oath",
+      kind: NarrativeEncounter,
+      description: "Demeter offers a frost-bound bargain.",
+      reward_tags: ["demeter"],
+    ),
+    (
+      id: "event_poseidon_depths",
+      name: "Call of the Deep",
+      kind: CombatEncounter,
+      description: "A sea beast rises from the depths.",
+      reward_tags: ["poseidon"],
+    ),
+    (
+      id: "event_zeus_crown",
+      name: "Storm Crown",
+      kind: CombatEncounter,
+      description: "Zeus tests your command of lightning.",
+      reward_tags: ["zeus"],
+    ),
+  ],
+)

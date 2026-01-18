@@ -1,0 +1,29 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "shop_armory",
+      name: "Armory",
+      kind: EquipmentShop,
+      inventory_table_id: "shop_armory_default",
+      price_multiplier: 1.0,
+    ),
+    (
+      id: "shop_blacksmith",
+      name: "Blacksmith",
+      kind: UpgradeShop,
+      upgrade_rules: (
+        max_tier: 5,
+        upgrade_cost_mode: TierParity,
+      ),
+    ),
+    (
+      id: "shop_enchanter",
+      name: "Enchanter",
+      kind: EnchantShop,
+      enchant_rules: (
+        max_passives: 5,
+      ),
+    ),
+  ],
+)

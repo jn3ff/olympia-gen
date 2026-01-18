@@ -1,0 +1,38 @@
+(
+  schema_version: 1,
+  segment_defaults: (
+    rooms_per_segment: 5,
+    bosses_per_segment: 2,
+    hub_after_segment: true,
+  ),
+  win_condition: (
+    mode: BossCount,
+    boss_target: 5,
+    // Future options: segments_cleared_target, faith_gained_target,
+    // quest_steps_target with AND/OR composition.
+  ),
+  reward_affinity: (
+    min_in_class_options: 1,
+    max_in_class_options: 2,
+  ),
+  economy: (
+    segment_value: 300,
+    item_price_range: (min: 50, max: 150),
+    rare_item_price_range: (min: 250, max: 800),
+    upgrade_cost_mode: TierParity,
+    passive_slots_by_tier: [1, 2, 3, 4, 5],
+  ),
+  stance_defaults: (
+    heavy_break_count: 4,
+    light_break_count: 7,
+    regen_light_per_seconds: 10.0,
+    parry_heavy_equivalent: 8,
+    break_refill_multiplier: 1.0,
+  ),
+  adversarial_events: (
+    trigger_within_segments: 3,
+  ),
+  encounter_defaults: (
+    specialty_tag_count: 1,
+  ),
+)

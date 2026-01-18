@@ -1,0 +1,19 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "minor_coin_cache",
+      name: "Coin Cache",
+      kind: Money,
+      value: 25,
+      description: "A small stash of coin.",
+    ),
+    (
+      id: "minor_health_orb",
+      name: "Health Orb",
+      kind: Heal,
+      value: 10,
+      description: "Restores a small amount of health.",
+    ),
+  ],
+)

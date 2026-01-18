@@ -1,0 +1,31 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "armor_helmet_cloth",
+      name: "Cloth Hood",
+      slot: Helmet,
+      tier: 1,
+      base_stats: (
+        max_health_bonus: 5.0,
+        damage_reduction: 0.0,
+      ),
+      passive_slots: 1,
+      base_passives: [],
+      tags: ["starter"],
+    ),
+    (
+      id: "armor_chest_leather",
+      name: "Leather Cuirass",
+      slot: Chestplate,
+      tier: 1,
+      base_stats: (
+        max_health_bonus: 10.0,
+        damage_reduction: 0.02,
+      ),
+      passive_slots: 1,
+      base_passives: [],
+      tags: ["starter"],
+    ),
+  ],
+)

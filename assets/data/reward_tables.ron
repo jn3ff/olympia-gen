@@ -1,0 +1,41 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "reward_room_default",
+      entries: [
+        (
+          kind: Money,
+          weight: 0.5,
+          amount_range: (min: 15, max: 35),
+        ),
+        (
+          kind: MinorItem,
+          weight: 0.3,
+          pool_id: "minor_items_default",
+        ),
+        (
+          kind: StatBoost,
+          weight: 0.2,
+          stat: MaxHealth,
+          amount: 10.0,
+        ),
+      ],
+    ),
+    (
+      id: "reward_boss_default",
+      entries: [
+        (
+          kind: Blessing,
+          weight: 0.6,
+          pool_id: "blessings_parent_god",
+        ),
+        (
+          kind: Equipment,
+          weight: 0.4,
+          pool_id: "equipment_tiered",
+        ),
+      ],
+    ),
+  ],
+)

@@ -1,0 +1,25 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "enemy_pool_basic",
+      enemies: [
+        (id: "enemy_grunt", weight: 0.7),
+        (id: "enemy_archer", weight: 0.3),
+      ],
+    ),
+    (
+      id: "enemy_pool_light",
+      enemies: [
+        (id: "enemy_grunt", weight: 0.8),
+        (id: "enemy_scout", weight: 0.2),
+      ],
+    ),
+    (
+      id: "elite_pool_basic",
+      enemies: [
+        (id: "elite_guardian", weight: 1.0),
+      ],
+    ),
+  ],
+)

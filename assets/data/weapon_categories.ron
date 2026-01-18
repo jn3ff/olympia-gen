@@ -1,0 +1,19 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "sword",
+      name: "Sword",
+      default_moveset_id: "moveset_sword_basic",
+      attack_types: [Light, Heavy, Special],
+      tags: ["melee", "slash"],
+    ),
+    (
+      id: "spear",
+      name: "Spear",
+      default_moveset_id: "moveset_spear_basic",
+      attack_types: [Light, Heavy, Special],
+      tags: ["melee", "thrust"],
+    ),
+  ],
+)

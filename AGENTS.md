@@ -24,3 +24,15 @@ For PRs, include:
 - A short description of the gameplay/system change.
 - Any relevant screenshots or short clips for UI/visual changes.
 - Notes on how to verify (commands run, manual steps).
+
+## Current Context (Vision + Data)
+- Vision decisions live in `concept/GAME-SPEC.md`.
+- Data is authored in RON under `assets/data/*.ron`.
+- V1 characters: Ares sword, Demeter sword, Poseidon spear, Zeus spear.
+- Defaults: segment = 5 rooms / 2 bosses, hub after each segment; win condition = boss count 5.
+- No map; no backtracking between rooms; no repeats for significant enemies.
+- Combat: light/heavy/special per weapon; stance defaults (4 heavies or 7 lights; parry breaks stance).
+- Economy: ~300 coin value per segment; items 50-150, rare 250-800; off-class allowed but 1-2 in-class options.
+- Encounters: one specialty tag guaranteed; curated tags tied to weapons; buff tags scale with tier.
+- Debug mode must support spawn, apply build templates, and invincible toggle (seed optional).
+- Implementation roadmap lives in `PLAN.md`.

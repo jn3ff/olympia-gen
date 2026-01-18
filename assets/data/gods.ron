@@ -1,0 +1,37 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "ares",
+      name: "Ares",
+      epithet: "God of War",
+      description: "Conflict, battle, and bloodshed.",
+      element_tags: ["war", "blood"],
+      primary_tree_id: "tree_ares",
+    ),
+    (
+      id: "demeter",
+      name: "Demeter",
+      epithet: "Goddess of Harvest",
+      description: "Growth, seasons, and cold bounty.",
+      element_tags: ["harvest", "frost"],
+      primary_tree_id: "tree_demeter",
+    ),
+    (
+      id: "poseidon",
+      name: "Poseidon",
+      epithet: "God of the Sea",
+      description: "Waves, storms, and the deep.",
+      element_tags: ["sea", "tide"],
+      primary_tree_id: "tree_poseidon",
+    ),
+    (
+      id: "zeus",
+      name: "Zeus",
+      epithet: "King of Olympus",
+      description: "Sky, thunder, and authority.",
+      element_tags: ["lightning", "storm"],
+      primary_tree_id: "tree_zeus",
+    ),
+  ],
+)

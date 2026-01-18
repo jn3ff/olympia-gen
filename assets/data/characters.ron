@@ -1,0 +1,97 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "character_ares_sword",
+      name: "Child of Ares",
+      parent_god_id: "ares",
+      starting_weapon_id: "weapon_sword_ares_basic",
+      weapon_affinity_ids: ["sword"],
+      starting_skills: (
+        passive: "skill_ares_passive",
+        common: "skill_ares_common",
+        ultimate: None,
+      ),
+      base_stats: (
+        max_health: 100.0,
+        attack_power: 10.0,
+        move_speed_mult: 1.0,
+        jump_height_mult: 1.0,
+      ),
+      movement_flags: (
+        wall_jump: true,
+        air_dash_unlocked: false,
+      ),
+      tags: ["v1"],
+    ),
+    (
+      id: "character_demeter_sword",
+      name: "Child of Demeter",
+      parent_god_id: "demeter",
+      starting_weapon_id: "weapon_sword_demeter_basic",
+      weapon_affinity_ids: ["sword"],
+      starting_skills: (
+        passive: "skill_demeter_passive",
+        common: "skill_demeter_common",
+        ultimate: None,
+      ),
+      base_stats: (
+        max_health: 100.0,
+        attack_power: 10.0,
+        move_speed_mult: 1.0,
+        jump_height_mult: 1.0,
+      ),
+      movement_flags: (
+        wall_jump: true,
+        air_dash_unlocked: false,
+      ),
+      tags: ["v1"],
+    ),
+    (
+      id: "character_poseidon_spear",
+      name: "Child of Poseidon",
+      parent_god_id: "poseidon",
+      starting_weapon_id: "weapon_spear_poseidon_basic",
+      weapon_affinity_ids: ["spear"],
+      starting_skills: (
+        passive: "skill_poseidon_passive",
+        common: "skill_poseidon_common",
+        ultimate: None,
+      ),
+      base_stats: (
+        max_health: 100.0,
+        attack_power: 10.0,
+        move_speed_mult: 1.0,
+        jump_height_mult: 1.0,
+      ),
+      movement_flags: (
+        wall_jump: true,
+        air_dash_unlocked: false,
+      ),
+      tags: ["v1"],
+    ),
+    (
+      id: "character_zeus_spear",
+      name: "Child of Zeus",
+      parent_god_id: "zeus",
+      starting_weapon_id: "weapon_spear_zeus_basic",
+      weapon_affinity_ids: ["spear"],
+      starting_skills: (
+        passive: "skill_zeus_passive",
+        common: "skill_zeus_common",
+        ultimate: None,
+      ),
+      base_stats: (
+        max_health: 100.0,
+        attack_power: 10.0,
+        move_speed_mult: 1.0,
+        jump_height_mult: 1.0,
+      ),
+      movement_flags: (
+        wall_jump: true,
+        air_dash_unlocked: false,
+      ),
+      tags: ["v1"],
+    ),
+  ],
+)

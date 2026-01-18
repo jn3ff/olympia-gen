@@ -1,0 +1,111 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "moveset_sword_basic",
+      name: "Sword Basic",
+      light_combo: (
+        loop_from: 0,
+        strikes: [
+          (
+            id: "sword_light_1",
+            damage: 8.0,
+            stance_damage: 1.0,
+            cooldown: 0.12,
+            hitbox: (length: 45.0, width: 35.0, offset: 28.0),
+          ),
+          (
+            id: "sword_light_2",
+            damage: 9.0,
+            stance_damage: 1.0,
+            cooldown: 0.12,
+            hitbox: (length: 46.0, width: 35.0, offset: 30.0),
+          ),
+          (
+            id: "sword_light_3",
+            damage: 10.0,
+            stance_damage: 1.0,
+            cooldown: 0.14,
+            hitbox: (length: 48.0, width: 36.0, offset: 32.0),
+          ),
+        ],
+      ),
+      heavy_combo: (
+        loop_from: 0,
+        strikes: [
+          (
+            id: "sword_heavy_1",
+            damage: 25.0,
+            stance_damage: 2.0,
+            cooldown: 0.5,
+            hitbox: (length: 50.0, width: 45.0, offset: 32.0),
+          ),
+        ],
+      ),
+      special: (
+        id: "sword_special_1",
+        damage: 40.0,
+        stance_damage: 3.0,
+        cooldown: 0.8,
+        hitbox: (length: 60.0, width: 50.0, offset: 35.0),
+      ),
+      parry: (
+        enabled: true,
+        window_seconds: 0.2,
+      ),
+    ),
+    (
+      id: "moveset_spear_basic",
+      name: "Spear Basic",
+      light_combo: (
+        loop_from: 0,
+        strikes: [
+          (
+            id: "spear_light_1",
+            damage: 7.0,
+            stance_damage: 1.0,
+            cooldown: 0.12,
+            hitbox: (length: 60.0, width: 28.0, offset: 36.0),
+          ),
+          (
+            id: "spear_light_2",
+            damage: 8.0,
+            stance_damage: 1.0,
+            cooldown: 0.13,
+            hitbox: (length: 62.0, width: 28.0, offset: 38.0),
+          ),
+          (
+            id: "spear_light_3",
+            damage: 9.0,
+            stance_damage: 1.0,
+            cooldown: 0.14,
+            hitbox: (length: 64.0, width: 28.0, offset: 40.0),
+          ),
+        ],
+      ),
+      heavy_combo: (
+        loop_from: 0,
+        strikes: [
+          (
+            id: "spear_heavy_1",
+            damage: 22.0,
+            stance_damage: 2.0,
+            cooldown: 0.55,
+            hitbox: (length: 70.0, width: 30.0, offset: 42.0),
+          ),
+        ],
+      ),
+      special: (
+        id: "spear_special_1",
+        damage: 35.0,
+        stance_damage: 3.0,
+        cooldown: 0.75,
+        hitbox: (length: 80.0, width: 40.0, offset: 44.0),
+      ),
+      parry: (
+        enabled: true,
+        window_seconds: 0.18,
+      ),
+    ),
+  ],
+)

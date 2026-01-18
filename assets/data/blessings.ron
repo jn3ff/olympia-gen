@@ -1,0 +1,37 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "blessing_ares_01",
+      name: "Bloodied Edge",
+      god_id: "ares",
+      tier: 1,
+      description: "Light strikes add a bleeding wound.",
+      effect_tags: ["bleed_on_hit"],
+    ),
+    (
+      id: "blessing_demeter_01",
+      name: "Winter's Breath",
+      god_id: "demeter",
+      tier: 1,
+      description: "Heavy strikes chill nearby foes.",
+      effect_tags: ["frost_slow"],
+    ),
+    (
+      id: "blessing_poseidon_01",
+      name: "Saltwater Surge",
+      god_id: "poseidon",
+      tier: 1,
+      description: "Knockback creates a tidal splash.",
+      effect_tags: ["tidal_splash"],
+    ),
+    (
+      id: "blessing_zeus_01",
+      name: "Skyfire",
+      god_id: "zeus",
+      tier: 1,
+      description: "Critical hits call down sparks.",
+      effect_tags: ["lightning_spark"],
+    ),
+  ],
+)

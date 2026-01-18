@@ -1,0 +1,22 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "blessings_parent_god",
+      kind: BlessingPool,
+      strategy: ParentGod,
+      tier_bias: 0.0,
+    ),
+    (
+      id: "equipment_tiered",
+      kind: EquipmentPool,
+      strategy: Tiered,
+      tier_bias: 0.0,
+    ),
+    (
+      id: "minor_items_default",
+      kind: MinorItemPool,
+      item_ids: ["minor_coin_cache", "minor_health_orb"],
+    ),
+  ],
+)

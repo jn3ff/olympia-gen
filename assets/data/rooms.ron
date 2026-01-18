@@ -1,0 +1,27 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "room_basic_combat",
+      name: "Basic Combat Room",
+      size: (width: 800.0, height: 500.0),
+      exits: [Left, Right],
+      room_type: Combat,
+      biome_id: "biome_default",
+      encounter_table_id: "encounter_basic",
+      modifiers: [],
+      tags: ["combat"],
+    ),
+    (
+      id: "room_basic_traversal",
+      name: "Basic Traversal Room",
+      size: (width: 900.0, height: 550.0),
+      exits: [Left, Right, Up],
+      room_type: Traversal,
+      biome_id: "biome_default",
+      encounter_table_id: "encounter_light",
+      modifiers: ["platform_focus"],
+      tags: ["traversal"],
+    ),
+  ],
+)

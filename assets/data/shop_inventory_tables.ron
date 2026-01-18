@@ -1,0 +1,11 @@
+(
+  schema_version: 1,
+  items: [
+    (
+      id: "shop_armory_default",
+      weapon_pool_id: "equipment_tiered",
+      armor_pool_id: "equipment_tiered",
+      reroll_cost: 50,
+    ),
+  ],
+)
