@@ -4,7 +4,7 @@ This plan focuses on scaffolding the core loop in Bevy 0.18 with modular, data-d
 
 Phase 0: Project skeleton and data pipeline
 - Set up Bevy app with plugin boundaries: core, movement, combat, rooms, rewards, ui, content.
-- Choose physics stack: bevy_xpbd_2d.
+- Choose physics stack: avian2d (successor of bevy_xpbd_2d)
 - Define GameState/RunState and RunConfig.
 - Add RON schemas for Character, GodBlessing, Weapon, Skill, SkillTree, Room.
 
@@ -37,7 +37,5 @@ Phase 6: Core loop integration
 - Wire arena -> room(s) -> boss -> reward -> next segment.
 - Add difficulty scaling hooks and run seed.
 
-Open questions
-- Finalize xpbd version alignment with Bevy 0.18.
 - Decide RON asset loading approach (custom loader vs helper crate).
 - Define initial roster of 12 characters and god blessings.

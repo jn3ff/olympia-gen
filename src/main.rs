@@ -6,15 +6,15 @@ mod rewards;
 mod rooms;
 mod ui;
 
+use avian2d::prelude::*;
 use bevy::prelude::*;
-use bevy_xpbd_2d::prelude::*;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Olympia".to_string(),
-                resolution: (1280.0, 720.0).into(),
+                resolution: (1280, 720).into(),
                 resizable: true,
                 ..default()
             }),

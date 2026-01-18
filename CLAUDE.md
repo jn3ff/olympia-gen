@@ -15,7 +15,7 @@ cargo fmt            # Format code
 
 ## Architecture
 
-Olympia is a 2D roguelike action game built with Bevy 0.18 and bevy_xpbd_2d for physics. The game follows a run-based structure: arena → rooms → boss → reward → next segment.
+Olympia is a 2D roguelike action game built with Bevy 0.18 and avian2d (successor of bevy_xpbd_2d) for physics. The game follows a run-based structure: arena → rooms → boss → reward → next segment.
 
 ### Plugin Structure
 

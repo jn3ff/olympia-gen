@@ -1,16 +1,15 @@
 use bevy::asset::Asset;
 use bevy::prelude::*;
-use bevy::reflect::TypePath;
 use serde::{Deserialize, Serialize};
 
-#[derive(Asset, TypePath, Debug, Clone, Deserialize, Serialize, Reflect)]
+#[derive(Asset, Debug, Clone, Deserialize, Serialize, Reflect)]
 pub struct CharacterDef {
     pub id: String,
     pub name: String,
     pub blessing_id: String,
 }
 
-#[derive(Asset, TypePath, Debug, Clone, Deserialize, Serialize, Reflect)]
+#[derive(Asset, Debug, Clone, Deserialize, Serialize, Reflect)]
 pub struct GodBlessingDef {
     pub id: String,
     pub name: String,
@@ -22,14 +21,14 @@ pub struct GodBlessingDef {
     pub skill_tree_id: String,
 }
 
-#[derive(Asset, TypePath, Debug, Clone, Deserialize, Serialize, Reflect)]
+#[derive(Asset, Debug, Clone, Deserialize, Serialize, Reflect)]
 pub struct WeaponDef {
     pub id: String,
     pub name: String,
     pub weapon_type: String,
 }
 
-#[derive(Asset, TypePath, Debug, Clone, Deserialize, Serialize, Reflect)]
+#[derive(Asset, Debug, Clone, Deserialize, Serialize, Reflect)]
 pub struct SkillDef {
     pub id: String,
     pub name: String,
@@ -37,7 +36,7 @@ pub struct SkillDef {
     pub slot: SkillSlot,
 }
 
-#[derive(Asset, TypePath, Debug, Clone, Deserialize, Serialize, Reflect)]
+#[derive(Asset, Debug, Clone, Deserialize, Serialize, Reflect)]
 pub struct SkillTreeDef {
     pub id: String,
     pub nodes: Vec<SkillNodeDef>,
@@ -49,7 +48,7 @@ pub struct SkillNodeDef {
     pub parent: Option<String>,
 }
 
-#[derive(Asset, TypePath, Debug, Clone, Deserialize, Serialize, Reflect)]
+#[derive(Asset, Debug, Clone, Deserialize, Serialize, Reflect)]
 pub struct RoomDef {
     pub id: String,
     pub name: String,
@@ -57,7 +56,7 @@ pub struct RoomDef {
     pub boss_room: bool,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, Reflect)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Reflect)]
 pub enum Direction {
     Up,
     Down,
