@@ -3,7 +3,7 @@ use bevy::ecs::message::{Message, MessageReader, MessageWriter};
 use bevy::prelude::*;
 
 use crate::content::{ContentRegistry, GameplayDefaults};
-use crate::core::SegmentProgress;
+use crate::core::{SegmentProgress, gameplay_active};
 use crate::movement::{Facing, GameLayer, MovementInput, MovementState, Player};
 use crate::rewards::{CoinGainedEvent, CoinSource};
 
@@ -979,14 +979,16 @@ impl Plugin for CombatPlugin {
                     update_parry_state,
                     update_stance,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(gameplay_active),
             )
             // Player combat systems
             .add_systems(
                 Update,
                 (process_player_attacks_from_moveset, process_parry_input)
                     .chain()
-                    .after(read_combat_input),
+                    .after(read_combat_input)
+                    .run_if(gameplay_active),
             )
             // Enemy AI systems
             .add_systems(
@@ -1000,7 +1002,8 @@ impl Plugin for CombatPlugin {
                     process_boss_attacks,
                 )
                     .chain()
-                    .after(update_combat_timers),
+                    .after(update_combat_timers)
+                    .run_if(gameplay_active),
             )
             // Collision and damage systems
             .add_systems(

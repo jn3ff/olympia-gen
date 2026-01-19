@@ -14,7 +14,7 @@ use crate::core::{
 };
 use crate::encounters::{EncounterCompletedEvent, EncounterStartedEvent};
 use crate::movement::{GameLayer, Ground, MovementTuning, Player, Wall};
-use crate::rewards::{CoinGainedEvent, CoinSource, PlayerBuild};
+use crate::rewards::{CoinGainedEvent, CoinSource, OpenShopEvent, PlayerBuild};
 
 // ============================================================================
 // Components
@@ -51,16 +51,6 @@ pub struct ArenaHub;
 /// Marker for directional portal in arena
 #[derive(Component, Debug)]
 pub struct ArenaPortal {
-    pub direction: Direction,
-}
-
-/// UI marker for direction choice
-#[derive(Component, Debug)]
-pub struct DirectionChoiceUI;
-
-/// Button for a specific direction
-#[derive(Component, Debug)]
-pub struct DirectionButton {
     pub direction: Direction,
 }
 
@@ -118,6 +108,36 @@ pub struct ShopTooltipUI;
 /// Marker for shop name label (Text2d above shop NPC)
 #[derive(Component, Debug)]
 pub struct ShopNameLabel;
+
+/// Component for animating portal color after player enters through it
+#[derive(Component, Debug)]
+pub struct PortalExitAnimation {
+    pub timer: Timer,
+    pub start_color: Color,
+    pub end_color: Color,
+}
+
+impl PortalExitAnimation {
+    pub fn new(start_color: Color, end_color: Color, duration_secs: f32) -> Self {
+        Self {
+            timer: Timer::from_seconds(duration_secs, TimerMode::Once),
+            start_color,
+            end_color,
+        }
+    }
+
+    pub fn current_color(&self) -> Color {
+        let t = self.timer.fraction();
+        let a = self.start_color.to_srgba();
+        let b = self.end_color.to_srgba();
+        Color::srgba(
+            a.red + (b.red - a.red) * t,
+            a.green + (b.green - a.green) * t,
+            a.blue + (b.blue - a.blue) * t,
+            a.alpha + (b.alpha - a.alpha) * t,
+        )
+    }
+}
 
 /// Condition that determines when a portal/exit becomes enabled
 #[derive(Debug, Clone, PartialEq)]
@@ -358,10 +378,9 @@ impl Plugin for RoomsPlugin {
                     check_segment_completion,
                     track_arena_portal_zone,
                     confirm_arena_portal_entry,
-                    update_direction_choice_ui,
-                    handle_direction_button_click,
                     track_player_shop_zone,
                     update_shop_tooltip,
+                    confirm_shop_entry,
                     update_arena_portal_tooltip,
                 )
                     .run_if(in_state(RunState::Arena)),
@@ -375,6 +394,7 @@ impl Plugin for RoomsPlugin {
                     process_room_transitions,
                     handle_boss_defeated,
                     update_portal_tooltip,
+                    update_portal_exit_animations,
                 )
                     .chain()
                     .run_if(in_state(RunState::Room)),
@@ -703,18 +723,21 @@ fn spawn_arena_hub(
         wall_layers,
     ));
 
-    // Directional portals
+    // Directional portals - Left and Right only, flush with walls at ground level
     let portal_positions = [
-        (Direction::Up, Vec2::new(0.0, 200.0)),
-        (Direction::Down, Vec2::new(0.0, -100.0)),
-        (Direction::Left, Vec2::new(-250.0, 0.0)),
-        (Direction::Right, Vec2::new(250.0, 0.0)),
+        (Direction::Left, Vec2::new(-320.0, -90.0)),
+        (Direction::Right, Vec2::new(320.0, -90.0)),
     ];
 
     for (direction, pos) in portal_positions {
-        let size = match direction {
+        let visual_size = match direction {
             Direction::Up | Direction::Down => Vec2::new(80.0, 30.0),
             Direction::Left | Direction::Right => Vec2::new(30.0, 80.0),
+        };
+        // Collider extends inward for player interaction
+        let collider_size = match direction {
+            Direction::Up | Direction::Down => Vec2::new(80.0, 60.0),
+            Direction::Left | Direction::Right => Vec2::new(60.0, 80.0),
         };
 
         commands.spawn((
@@ -723,11 +746,11 @@ fn spawn_arena_hub(
             PortalEnabled,
             Sprite {
                 color: portal_color,
-                custom_size: Some(size),
+                custom_size: Some(visual_size),
                 ..default()
             },
             Transform::from_xyz(pos.x, pos.y, 0.5),
-            Collider::rectangle(size.x, size.y),
+            Collider::rectangle(collider_size.x, collider_size.y),
             Sensor,
             CollisionEventsEnabled,
             CollisionLayers::new(GameLayer::Sensor, [GameLayer::Player]),
@@ -742,9 +765,6 @@ fn spawn_arena_hub(
             .insert(Transform::from_xyz(0.0, 50.0, 0.0))
             .remove::<PlayerInPortalZone>(); // Clear any stale portal zone state
     }
-
-    // Spawn direction choice UI
-    spawn_direction_choice_ui(&mut commands);
 
     // Spawn segment info UI with progress
     spawn_segment_info_ui(
@@ -818,55 +838,6 @@ fn spawn_shop_npcs(commands: &mut Commands) {
             CollisionLayers::new(GameLayer::Sensor, [GameLayer::Player]),
         ));
     }
-}
-
-fn spawn_direction_choice_ui(commands: &mut Commands) {
-    commands
-        .spawn((
-            DirectionChoiceUI,
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: Val::Px(20.0),
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(20.0),
-                ..default()
-            },
-        ))
-        .with_children(|parent| {
-            // Direction labels - players walk to portals and press E to enter
-            let directions = [
-                (Direction::Left, "← West"),
-                (Direction::Up, "↑ North"),
-                (Direction::Down, "↓ South"),
-                (Direction::Right, "→ East"),
-            ];
-
-            for (direction, label) in directions {
-                parent
-                    .spawn((
-                        DirectionButton { direction },
-                        Button,
-                        Node {
-                            padding: UiRect::all(Val::Px(12.0)),
-                            border: UiRect::all(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BorderColor::all(Color::srgb(0.5, 0.5, 0.6)),
-                        BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                    ))
-                    .with_child((
-                        Text::new(label),
-                        TextFont {
-                            font_size: 18.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.9, 0.9, 0.9)),
-                    ));
-            }
-        });
 }
 
 fn spawn_segment_info_ui(
@@ -1001,7 +972,6 @@ fn cleanup_arena(
             With<ArenaPortal>,
             With<Ground>,
             With<Wall>,
-            With<DirectionChoiceUI>,
             With<ArenaSegmentInfo>,
             With<ShopNPC>,
             With<ShopInteractionZone>,
@@ -1139,58 +1109,6 @@ fn confirm_arena_portal_entry(
                 });
                 next_state.set(RunState::Room);
             }
-        }
-    }
-}
-
-fn update_direction_choice_ui(
-    mut button_query: Query<(&DirectionButton, &Interaction, &mut BackgroundColor)>,
-) {
-    for (_button, interaction, mut bg_color) in &mut button_query {
-        *bg_color = match interaction {
-            Interaction::Pressed => BackgroundColor(Color::srgb(0.3, 0.4, 0.5)),
-            Interaction::Hovered => BackgroundColor(Color::srgb(0.2, 0.25, 0.35)),
-            Interaction::None => BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-        };
-    }
-}
-
-fn handle_direction_button_click(
-    button_query: Query<(&DirectionButton, &Interaction)>,
-    cooldown: Res<TransitionCooldown>,
-    mut room_graph: ResMut<RoomGraph>,
-    registry: Res<RoomRegistry>,
-    mut next_state: ResMut<NextState<RunState>>,
-) {
-    // Check cooldown before allowing any transitions
-    if !cooldown.can_transition() {
-        return;
-    }
-
-    // Only check UI button clicks - WASD/arrows are for movement
-    // Players should walk to portals and press E to enter
-    let direction = button_query
-        .iter()
-        .find(|(_, interaction)| **interaction == Interaction::Pressed)
-        .map(|(button, _)| button.direction);
-
-    if let Some(dir) = direction {
-        if let Some(room_id) = find_room_for_direction(&registry, dir) {
-            info!(
-                "[TRANSITION] Direction button {:?} -> room '{}'",
-                dir, room_id
-            );
-            room_graph.pending_transition = Some(RoomTransition {
-                from_room: None,
-                to_room: room_id.clone(),
-                entry_direction: opposite_direction(dir),
-            });
-            info!(
-                "[TRANSITION] pending_transition set: {:?}",
-                room_graph.pending_transition
-            );
-            next_state.set(RunState::Room);
-            info!("[TRANSITION] RunState changed to Room");
         }
     }
 }
@@ -1386,7 +1304,7 @@ fn spawn_boss_room_enemies(
 fn spawn_room_geometry(
     commands: &mut Commands,
     room: &RoomData,
-    _entry_direction: Option<Direction>,
+    entry_direction: Option<Direction>,
     movement_tuning: &MovementTuning,
 ) {
     let wall_color = Color::srgb(0.3, 0.3, 0.4);
@@ -1580,9 +1498,7 @@ fn spawn_room_geometry(
             wall_layers,
         ));
 
-        // Exit sensor positioned INSIDE the room so player can overlap it
-        // The visual portal is shown at the wall position, but the sensor extends inward
-        let sensor_offset = wall_thickness / 2.0 + 20.0; // Position sensor inside the room
+        // Exit sensor flush with wall - collider extends inward for player interaction
         let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Up,
@@ -1595,8 +1511,8 @@ fn spawn_room_geometry(
                 custom_size: Some(Vec2::new(gap_width, wall_thickness)),
                 ..default()
             },
-            Transform::from_xyz(0.0, half_height - sensor_offset, 0.5),
-            Collider::rectangle(gap_width, wall_thickness + 20.0),
+            Transform::from_xyz(0.0, half_height, 0.5),
+            Collider::rectangle(gap_width, wall_thickness + 40.0),
             Sensor,
             CollisionEventsEnabled,
             CollisionLayers::new(GameLayer::Sensor, [GameLayer::Player]),
@@ -1605,6 +1521,14 @@ fn spawn_room_geometry(
             exit_cmd.insert(PortalEnabled);
         } else {
             exit_cmd.insert(PortalDisabled);
+        }
+        // Add entry animation if this is the portal the player came through
+        if entry_direction == Some(Direction::Up) {
+            exit_cmd.insert(PortalExitAnimation::new(
+                exit_enabled_color,
+                wall_color,
+                0.5,
+            ));
         }
     } else {
         // Full ceiling
@@ -1741,8 +1665,7 @@ fn spawn_room_geometry(
             wall_layers,
         ));
 
-        // Exit sensor positioned INSIDE the room so player can overlap it
-        let sensor_offset = wall_thickness / 2.0 + 20.0;
+        // Exit sensor flush with wall - collider extends inward for player interaction
         let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Left,
@@ -1755,8 +1678,8 @@ fn spawn_room_geometry(
                 custom_size: Some(Vec2::new(wall_thickness, gap_height)),
                 ..default()
             },
-            Transform::from_xyz(-half_width + sensor_offset, 0.0, 0.5),
-            Collider::rectangle(wall_thickness + 20.0, gap_height),
+            Transform::from_xyz(-half_width, 0.0, 0.5),
+            Collider::rectangle(wall_thickness + 40.0, gap_height),
             Sensor,
             CollisionEventsEnabled,
             CollisionLayers::new(GameLayer::Sensor, [GameLayer::Player]),
@@ -1765,6 +1688,14 @@ fn spawn_room_geometry(
             exit_cmd.insert(PortalEnabled);
         } else {
             exit_cmd.insert(PortalDisabled);
+        }
+        // Add entry animation if this is the portal the player came through
+        if entry_direction == Some(Direction::Left) {
+            exit_cmd.insert(PortalExitAnimation::new(
+                exit_enabled_color,
+                wall_color,
+                0.5,
+            ));
         }
     } else {
         commands.spawn((
@@ -1900,8 +1831,7 @@ fn spawn_room_geometry(
             wall_layers,
         ));
 
-        // Exit sensor positioned INSIDE the room so player can overlap it
-        let sensor_offset = wall_thickness / 2.0 + 20.0;
+        // Exit sensor flush with wall - collider extends inward for player interaction
         let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Right,
@@ -1914,8 +1844,8 @@ fn spawn_room_geometry(
                 custom_size: Some(Vec2::new(wall_thickness, gap_height)),
                 ..default()
             },
-            Transform::from_xyz(half_width - sensor_offset, 0.0, 0.5),
-            Collider::rectangle(wall_thickness + 20.0, gap_height),
+            Transform::from_xyz(half_width, 0.0, 0.5),
+            Collider::rectangle(wall_thickness + 40.0, gap_height),
             Sensor,
             CollisionEventsEnabled,
             CollisionLayers::new(GameLayer::Sensor, [GameLayer::Player]),
@@ -1924,6 +1854,14 @@ fn spawn_room_geometry(
             exit_cmd.insert(PortalEnabled);
         } else {
             exit_cmd.insert(PortalDisabled);
+        }
+        // Add entry animation if this is the portal the player came through
+        if entry_direction == Some(Direction::Right) {
+            exit_cmd.insert(PortalExitAnimation::new(
+                exit_enabled_color,
+                wall_color,
+                0.5,
+            ));
         }
     } else {
         commands.spawn((
@@ -1978,8 +1916,7 @@ fn spawn_room_geometry(
             ground_layers,
         ));
 
-        // The Down exit sensor is below the bridge platform
-        // When player presses E, they'll descend through
+        // The Down exit sensor is flush with the floor - collider extends upward for player interaction
         let mut exit_cmd = commands.spawn((
             RoomExit {
                 direction: Direction::Down,
@@ -1992,9 +1929,8 @@ fn spawn_room_geometry(
                 custom_size: Some(Vec2::new(gap_width, wall_thickness / 2.0)),
                 ..default()
             },
-            // Position sensor at ground level so player's feet touch it while standing on the bridge
-            Transform::from_xyz(0.0, -half_height + platform_height / 2.0 + 10.0, 0.5),
-            Collider::rectangle(gap_width, wall_thickness),
+            Transform::from_xyz(0.0, -half_height, 0.5),
+            Collider::rectangle(gap_width, wall_thickness + 40.0),
             Sensor,
             CollisionEventsEnabled,
             CollisionLayers::new(GameLayer::Sensor, [GameLayer::Player]),
@@ -2003,6 +1939,14 @@ fn spawn_room_geometry(
             exit_cmd.insert(PortalEnabled);
         } else {
             exit_cmd.insert(PortalDisabled);
+        }
+        // Add entry animation if this is the portal the player came through
+        if entry_direction == Some(Direction::Down) {
+            exit_cmd.insert(PortalExitAnimation::new(
+                exit_enabled_color,
+                wall_color,
+                0.5,
+            ));
         }
     }
 
@@ -2791,6 +2735,42 @@ fn update_shop_tooltip(
         // Player not near shop, remove tooltip
         for entity in &existing_tooltip {
             commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// Opens shop when player presses E while near a shop NPC
+fn confirm_shop_entry(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    player_near_shop: Query<&NearShop, With<Player>>,
+    mut shop_events: MessageWriter<OpenShopEvent>,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyE) {
+        return;
+    }
+
+    let Ok(near_shop) = player_near_shop.single() else {
+        return;
+    };
+
+    info!("Opening shop: {}", near_shop.shop_id);
+    shop_events.write(OpenShopEvent {
+        shop_id: near_shop.shop_id.clone(),
+    });
+}
+
+/// Ticks portal exit animations and updates sprite colors
+fn update_portal_exit_animations(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut query: Query<(Entity, &mut PortalExitAnimation, &mut Sprite)>,
+) {
+    for (entity, mut animation, mut sprite) in &mut query {
+        animation.timer.tick(time.delta());
+        sprite.color = animation.current_color();
+
+        if animation.timer.remaining_secs() == 0.0 {
+            commands.entity(entity).remove::<PortalExitAnimation>();
         }
     }
 }

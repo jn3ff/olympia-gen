@@ -16,6 +16,36 @@ pub enum GameState {
 }
 
 // ============================================================================
+// Gameplay Pause
+// ============================================================================
+
+/// Resource tracking if gameplay should be paused.
+/// Gameplay is paused if any source is active.
+#[derive(Resource, Debug, Default)]
+pub struct GameplayPaused {
+    pub sources: HashSet<String>,
+}
+
+impl GameplayPaused {
+    pub fn is_paused(&self) -> bool {
+        !self.sources.is_empty()
+    }
+
+    pub fn pause(&mut self, source: impl Into<String>) {
+        self.sources.insert(source.into());
+    }
+
+    pub fn unpause(&mut self, source: impl Into<String>) {
+        self.sources.remove(&source.into());
+    }
+}
+
+/// Run condition: returns true only when gameplay is not paused
+pub fn gameplay_active(paused: Res<GameplayPaused>) -> bool {
+    !paused.is_paused()
+}
+
+// ============================================================================
 // Character Selection
 // ============================================================================
 
@@ -221,6 +251,7 @@ impl Plugin for CorePlugin {
             .init_resource::<DifficultyScaling>()
             .init_resource::<SelectedCharacter>()
             .init_resource::<SegmentProgress>()
+            .init_resource::<GameplayPaused>()
             .add_message::<CharacterSelectedEvent>()
             .add_message::<SegmentCompletedEvent>()
             .add_message::<RunVictoryEvent>()

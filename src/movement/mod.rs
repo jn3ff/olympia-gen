@@ -6,7 +6,7 @@ use crate::combat::{
     PlayerMoveset, SkillSlots, Stagger, Team, Weapon,
 };
 use crate::content::ContentRegistry;
-use crate::core::{GameState, SelectedCharacter};
+use crate::core::{GameState, SelectedCharacter, gameplay_active};
 use crate::encounters::EncounterBuffs;
 use crate::rewards::{ActiveSkills, BaseStats, MovementFlags, PlayerBuild};
 
@@ -181,7 +181,8 @@ impl Plugin for MovementPlugin {
                     apply_gravity,
                     update_facing,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(gameplay_active),
             );
     }
 }

@@ -7,7 +7,7 @@ use crate::combat::BossDefeatedEvent;
 use crate::content::{
     BlessingDef, ContentRegistry, EquipmentItemDef, GameplayDefaults, StatKind as ContentStatKind,
 };
-use crate::core::{DifficultyScaling, RunConfig, RunState, SegmentCompletedEvent};
+use crate::core::{DifficultyScaling, GameplayPaused, RunConfig, RunState, SegmentCompletedEvent};
 
 pub mod faith;
 pub use faith::{
@@ -271,6 +271,12 @@ impl Message for OpenShopEvent {}
 pub struct CloseShopEvent;
 
 impl Message for CloseShopEvent {}
+
+/// Event to reroll shop inventory (costs coins)
+#[derive(Debug)]
+pub struct RerollShopEvent;
+
+impl Message for RerollShopEvent {}
 
 /// Event fired when an item is purchased
 #[derive(Debug)]
@@ -592,7 +598,7 @@ impl RewardKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EquipmentSlot {
     Helmet,
     Chestplate,
@@ -1026,6 +1032,10 @@ pub struct ShopItemButton {
 #[derive(Component, Debug)]
 pub struct CloseShopButton;
 
+/// Marker for reroll shop button
+#[derive(Component, Debug)]
+pub struct RerollShopButton;
+
 /// Marker for upgrade item buttons (Blacksmith)
 #[derive(Component, Debug)]
 pub struct UpgradeItemButton {
@@ -1057,6 +1067,7 @@ impl Plugin for RewardsPlugin {
             .add_message::<CoinSpentEvent>()
             .add_message::<OpenShopEvent>()
             .add_message::<CloseShopEvent>()
+            .add_message::<RerollShopEvent>()
             .add_message::<ItemPurchasedEvent>()
             .add_message::<ItemUpgradedEvent>()
             .add_message::<ItemEnchantedEvent>()
@@ -1069,6 +1080,7 @@ impl Plugin for RewardsPlugin {
                 (
                     handle_open_shop,
                     handle_close_shop,
+                    handle_shop_reroll,
                     handle_shop_purchase,
                     handle_upgrade_purchase,
                     handle_enchant_purchase,
@@ -2088,6 +2100,7 @@ fn handle_open_shop(
     mut commands: Commands,
     mut shop_events: MessageReader<OpenShopEvent>,
     mut shop_state: ResMut<ShopState>,
+    mut gameplay_paused: ResMut<GameplayPaused>,
     content_registry: Res<ContentRegistry>,
     gameplay_defaults: Res<GameplayDefaults>,
     player_build: Res<PlayerBuild>,
@@ -2104,6 +2117,9 @@ fn handle_open_shop(
         if !existing_shop_ui.is_empty() {
             continue;
         }
+
+        // Pause gameplay while shop is open
+        gameplay_paused.pause("shop");
 
         info!("Opening shop: {}", event.shop_id);
 
@@ -2136,25 +2152,30 @@ fn handle_open_shop(
 }
 
 /// Generate shop inventory based on shop ID and content registry
+/// Returns exactly 5 items - one for each equipment slot
 fn generate_shop_inventory(
     shop_id: &str,
     registry: &ContentRegistry,
     defaults: &GameplayDefaults,
 ) -> Vec<ShopItem> {
-    let mut items = Vec::new();
+    use std::collections::HashMap;
 
     // Get base prices from defaults
     let base_price_min = defaults.economy.item_price_range.min as u32;
     let base_price_max = defaults.economy.item_price_range.max as u32;
 
+    // Group all equipment items by slot
+    let mut items_by_slot: HashMap<EquipmentSlot, Vec<ShopItem>> = HashMap::new();
+
     match shop_id {
-        "shop_armory" => {
-            // Armory sells equipment items
+        "shop_armory" | _ => {
+            // Collect all items grouped by slot
             for equip in registry.equipment_items.values() {
                 let tier = RewardTier::from_level(equip.tier as u8);
                 let price = calculate_item_price(tier, base_price_min, base_price_max);
+                let slot = convert_equipment_slot(equip.slot);
 
-                items.push(ShopItem {
+                let item = ShopItem {
                     item_id: equip.id.clone(),
                     name: equip.name.clone(),
                     description: format!(
@@ -2164,37 +2185,38 @@ fn generate_shop_inventory(
                     ),
                     tier,
                     price,
-                    slot: convert_equipment_slot(equip.slot),
-                });
-            }
-        }
-        "shop_blacksmith" | "shop_enchanter" => {
-            // These shops handle upgrades/enchants, not direct purchases
-            // For now, show a placeholder message
-        }
-        _ => {
-            // Unknown shop - show some default items from equipment
-            for equip in registry.equipment_items.values().take(4) {
-                let tier = RewardTier::from_level(equip.tier as u8);
-                let price = calculate_item_price(tier, base_price_min, base_price_max);
+                    slot,
+                };
 
-                items.push(ShopItem {
-                    item_id: equip.id.clone(),
-                    name: equip.name.clone(),
-                    description: format!(
-                        "+{:.0} HP, {:.1}% DR",
-                        equip.base_stats.max_health_bonus,
-                        equip.base_stats.damage_reduction * 100.0
-                    ),
-                    tier,
-                    price,
-                    slot: convert_equipment_slot(equip.slot),
-                });
+                items_by_slot.entry(slot).or_default().push(item);
             }
         }
     }
 
-    items
+    // Pick one random item per slot
+    let mut rng = rand::rng();
+    let mut result = Vec::with_capacity(5);
+
+    // Iterate through slots in a consistent order
+    let slots = [
+        EquipmentSlot::Helmet,
+        EquipmentSlot::Chestplate,
+        EquipmentSlot::Greaves,
+        EquipmentSlot::Boots,
+        EquipmentSlot::MainHand,
+    ];
+
+    for slot in slots {
+        if let Some(slot_items) = items_by_slot.get_mut(&slot) {
+            if !slot_items.is_empty() {
+                // Pick a random item from this slot
+                let idx = rng.random_range(0..slot_items.len());
+                result.push(slot_items.swap_remove(idx));
+            }
+        }
+    }
+
+    result
 }
 
 /// Calculate item price based on tier
@@ -2513,32 +2535,78 @@ fn spawn_shop_ui(
                     }
                 });
 
-            // Close button
+            // Button row (Reroll + Close)
+            let reroll_cost = 25u32;
+            let can_afford_reroll = wallet.coins >= reroll_cost;
             parent
-                .spawn((
-                    CloseShopButton,
-                    Button,
-                    Node {
-                        margin: UiRect::top(Val::Px(25.0)),
-                        padding: UiRect::axes(Val::Px(30.0), Val::Px(12.0)),
-                        border: UiRect::all(Val::Px(2.0)),
-                        ..default()
-                    },
-                    BorderColor::all(Color::srgb(0.4, 0.4, 0.5)),
-                    BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                ))
-                .with_child((
-                    Text::new("Close [Esc]"),
-                    TextFont {
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(muted_text),
-                ));
+                .spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(20.0),
+                    margin: UiRect::top(Val::Px(25.0)),
+                    ..default()
+                },))
+                .with_children(|buttons| {
+                    // Reroll button (only for armory)
+                    if shop_id == "shop_armory" {
+                        let reroll_border = if can_afford_reroll {
+                            Color::srgb(0.5, 0.6, 0.4)
+                        } else {
+                            Color::srgb(0.4, 0.3, 0.3)
+                        };
+                        buttons
+                            .spawn((
+                                RerollShopButton,
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
+                                    border: UiRect::all(Val::Px(2.0)),
+                                    ..default()
+                                },
+                                BorderColor::all(reroll_border),
+                                BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
+                            ))
+                            .with_child((
+                                Text::new(format!("Reroll [R] - {} gold", reroll_cost)),
+                                TextFont {
+                                    font_size: 18.0,
+                                    ..default()
+                                },
+                                TextColor(if can_afford_reroll {
+                                    gold_color
+                                } else {
+                                    Color::srgb(0.5, 0.4, 0.4)
+                                }),
+                            ));
+                    }
+
+                    // Close button
+                    buttons
+                        .spawn((
+                            CloseShopButton,
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(30.0), Val::Px(12.0)),
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BorderColor::all(Color::srgb(0.4, 0.4, 0.5)),
+                            BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
+                        ))
+                        .with_child((
+                            Text::new("Close [Esc]"),
+                            TextFont {
+                                font_size: 18.0,
+                                ..default()
+                            },
+                            TextColor(muted_text),
+                        ));
+                });
 
             // Keyboard hint
             parent.spawn((
-                Text::new("Press 1-9 to purchase, Esc to close"),
+                Text::new("Press 1-5 to purchase, R to reroll, Esc to close"),
                 TextFont {
                     font_size: 14.0,
                     ..default()
@@ -2936,9 +3004,13 @@ fn handle_close_shop(
     mut commands: Commands,
     mut close_events: MessageReader<CloseShopEvent>,
     mut shop_state: ResMut<ShopState>,
+    mut gameplay_paused: ResMut<GameplayPaused>,
     shop_ui_query: Query<Entity, With<ShopUI>>,
 ) {
     for _ in close_events.read() {
+        // Unpause gameplay when shop closes
+        gameplay_paused.unpause("shop");
+
         shop_state.close();
 
         for entity in shop_ui_query.iter() {
@@ -2946,6 +3018,59 @@ fn handle_close_shop(
         }
 
         info!("Shop closed");
+    }
+}
+
+/// Handle shop reroll (regenerates inventory for a cost)
+fn handle_shop_reroll(
+    mut commands: Commands,
+    mut reroll_events: MessageReader<RerollShopEvent>,
+    mut shop_state: ResMut<ShopState>,
+    mut wallet: ResMut<PlayerWallet>,
+    content_registry: Res<ContentRegistry>,
+    gameplay_defaults: Res<GameplayDefaults>,
+    shop_ui_query: Query<Entity, With<ShopUI>>,
+    reroll_button_query: Query<(&Interaction, &RerollShopButton), Changed<Interaction>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+) {
+    let reroll_cost = 25u32;
+
+    // Check for reroll button click
+    let clicked = reroll_button_query
+        .iter()
+        .any(|(interaction, _)| *interaction == Interaction::Pressed);
+
+    // Check for R key press
+    let key_pressed = keyboard.just_pressed(KeyCode::KeyR);
+
+    // Process reroll if triggered by event, click, or key
+    let should_reroll = !reroll_events.is_empty() || clicked || key_pressed;
+    reroll_events.clear();
+
+    if should_reroll && shop_state.is_open() {
+        // Only allow reroll in armory
+        if shop_state.active_shop_id.as_deref() != Some("shop_armory") {
+            return;
+        }
+
+        // Check if player can afford
+        if !wallet.spend(reroll_cost) {
+            info!("Cannot afford reroll (need {} gold)", reroll_cost);
+            return;
+        }
+
+        info!("Rerolling shop inventory for {} gold", reroll_cost);
+
+        // Regenerate inventory
+        shop_state.inventory =
+            generate_shop_inventory("shop_armory", &content_registry, &gameplay_defaults);
+
+        // Despawn old UI and respawn
+        for entity in shop_ui_query.iter() {
+            commands.entity(entity).despawn();
+        }
+
+        spawn_shop_ui(&mut commands, &shop_state, &wallet, "shop_armory");
     }
 }
 
