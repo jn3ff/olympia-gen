@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::combat::{BossAI, Enemy, Health};
 use crate::core::RunState;
 use crate::movement::Player;
+use crate::rewards::PlayerWallet;
 
 // ============================================================================
 // Constants
@@ -72,6 +73,14 @@ pub struct PlayerDeathState {
     pub is_dead: bool,
 }
 
+/// Marker for the coin display UI container
+#[derive(Component)]
+pub struct CoinDisplayUI;
+
+/// Marker for the coin amount text
+#[derive(Component)]
+pub struct CoinAmountText;
+
 // ============================================================================
 // Plugin
 // ============================================================================
@@ -81,11 +90,12 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PlayerDeathState>()
-            .add_systems(Startup, spawn_player_healthbar_ui)
+            .add_systems(Startup, (spawn_player_healthbar_ui, spawn_coin_display_ui))
             .add_systems(
                 Update,
                 (
                     update_player_healthbar,
+                    update_coin_display,
                     spawn_enemy_healthbars,
                     update_enemy_healthbars,
                     cleanup_enemy_healthbars,
@@ -159,6 +169,60 @@ fn update_player_healthbar(
 }
 
 // ============================================================================
+// Coin Display Systems
+// ============================================================================
+
+fn spawn_coin_display_ui(mut commands: Commands) {
+    // Position below the health bar
+    commands
+        .spawn((
+            CoinDisplayUI,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(PLAYER_HEALTHBAR_PADDING),
+                top: Val::Px(PLAYER_HEALTHBAR_PADDING + PLAYER_HEALTHBAR_HEIGHT + 8.0),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            },
+        ))
+        .with_children(|parent| {
+            // Coin icon (gold square)
+            parent.spawn((
+                Node {
+                    width: Val::Px(16.0),
+                    height: Val::Px(16.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.9, 0.75, 0.2)),
+            ));
+
+            // Coin amount text
+            parent.spawn((
+                CoinAmountText,
+                Text::new("0"),
+                TextFont {
+                    font_size: 18.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.85, 0.5)),
+            ));
+        });
+}
+
+fn update_coin_display(
+    wallet: Res<PlayerWallet>,
+    mut query: Query<&mut Text, With<CoinAmountText>>,
+) {
+    if wallet.is_changed() {
+        for mut text in &mut query {
+            **text = format!("{}", wallet.coins);
+        }
+    }
+}
+
+// ============================================================================
 // Enemy Health Bar Systems
 // ============================================================================
 
@@ -182,7 +246,10 @@ fn spawn_enemy_healthbars(
             },
             Sprite {
                 color: Color::srgba(0.1, 0.1, 0.1, 0.8),
-                custom_size: Some(Vec2::new(ENEMY_HEALTHBAR_WIDTH + 2.0, ENEMY_HEALTHBAR_HEIGHT + 2.0)),
+                custom_size: Some(Vec2::new(
+                    ENEMY_HEALTHBAR_WIDTH + 2.0,
+                    ENEMY_HEALTHBAR_HEIGHT + 2.0,
+                )),
                 ..default()
             },
             Transform::from_xyz(0.0, 0.0, 5.0),
@@ -214,10 +281,7 @@ fn update_enemy_healthbars(
     // Update background bar positions
     for (bar, mut bar_transform) in &mut bar_query {
         if let Ok((enemy_transform, _health, enemy_sprite)) = enemy_query.get(bar.owner) {
-            let enemy_height = enemy_sprite
-                .custom_size
-                .map(|s| s.y)
-                .unwrap_or(32.0);
+            let enemy_height = enemy_sprite.custom_size.map(|s| s.y).unwrap_or(32.0);
             bar_transform.translation.x = enemy_transform.translation.x;
             bar_transform.translation.y =
                 enemy_transform.translation.y + enemy_height / 2.0 + ENEMY_HEALTHBAR_OFFSET_Y;
@@ -227,10 +291,7 @@ fn update_enemy_healthbars(
     // Update fill bars
     for (fill, mut fill_transform, mut fill_sprite) in &mut fill_query {
         if let Ok((enemy_transform, health, enemy_sprite)) = enemy_query.get(fill.owner) {
-            let enemy_height = enemy_sprite
-                .custom_size
-                .map(|s| s.y)
-                .unwrap_or(32.0);
+            let enemy_height = enemy_sprite.custom_size.map(|s| s.y).unwrap_or(32.0);
             let percent = health.percent();
             let fill_width = ENEMY_HEALTHBAR_WIDTH * percent;
 
@@ -314,9 +375,7 @@ fn spawn_boss_healthbar(
             .with_children(|parent| {
                 // Health bar fill
                 parent.spawn((
-                    BossHealthBarFill {
-                        owner: boss_entity,
-                    },
+                    BossHealthBarFill { owner: boss_entity },
                     Node {
                         width: Val::Percent(100.0),
                         height: Val::Percent(100.0),

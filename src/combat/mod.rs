@@ -2,7 +2,10 @@ use avian2d::prelude::*;
 use bevy::ecs::message::{Message, MessageReader, MessageWriter};
 use bevy::prelude::*;
 
+use crate::content::{ContentRegistry, GameplayDefaults};
+use crate::core::SegmentProgress;
 use crate::movement::{Facing, GameLayer, MovementInput, MovementState, Player};
+use crate::rewards::{CoinGainedEvent, CoinSource};
 
 // ============================================================================
 // Components
@@ -74,6 +77,7 @@ impl Invulnerable {
 pub struct Hitbox {
     pub damage: f32,
     pub knockback: f32,
+    pub stance_damage: f32,
     pub owner: Entity,
     pub hit_entities: Vec<Entity>,
 }
@@ -137,6 +141,52 @@ impl EnemyTier {
             EnemyTier::Major => Color::srgb(0.9, 0.5, 0.2),
             EnemyTier::Special => Color::srgb(0.7, 0.3, 0.8),
             EnemyTier::Boss => Color::srgb(0.9, 0.1, 0.1),
+        }
+    }
+}
+
+// ============================================================================
+// Enemy Identity
+// ============================================================================
+
+/// Baseline DPS assumption for significance calculation (~2 lights/sec at 8 damage)
+pub const BASELINE_DPS: f32 = 20.0;
+/// Enemies with health pools taking longer than this to defeat are "significant"
+pub const SIGNIFICANT_THRESHOLD_SECONDS: f32 = 30.0;
+
+/// Identifies an enemy by its definition, used for no-repeat logic and narrative hooks.
+#[derive(Component, Debug, Clone)]
+pub struct EnemyIdentity {
+    /// The id from EnemyDef in content registry
+    pub def_id: String,
+    /// Whether this enemy is "significant" (health pool > 30s at baseline DPS)
+    /// Significant enemies don't repeat within a run
+    pub is_significant: bool,
+}
+
+impl EnemyIdentity {
+    /// Create identity for a non-significant enemy
+    pub fn minor(def_id: impl Into<String>) -> Self {
+        Self {
+            def_id: def_id.into(),
+            is_significant: false,
+        }
+    }
+
+    /// Create identity for a significant enemy
+    pub fn significant(def_id: impl Into<String>) -> Self {
+        Self {
+            def_id: def_id.into(),
+            is_significant: true,
+        }
+    }
+
+    /// Calculate significance based on effective health pool
+    pub fn from_health(def_id: impl Into<String>, effective_health: f32) -> Self {
+        let time_to_kill = effective_health / BASELINE_DPS;
+        Self {
+            def_id: def_id.into(),
+            is_significant: time_to_kill > SIGNIFICANT_THRESHOLD_SECONDS,
         }
     }
 }
@@ -283,6 +333,239 @@ pub struct SkillCooldowns {
     pub common_timer: f32,
     pub heavy_timer: f32,
 }
+
+// ============================================================================
+// Data-Driven Moveset System
+// ============================================================================
+
+/// References a moveset by id from the ContentRegistry.
+/// Player attacks will use this moveset's strike definitions.
+#[derive(Component, Debug, Clone)]
+pub struct PlayerMoveset {
+    pub moveset_id: String,
+}
+
+impl Default for PlayerMoveset {
+    fn default() -> Self {
+        Self {
+            moveset_id: "moveset_sword_basic".to_string(),
+        }
+    }
+}
+
+/// Tracks the player's current position in attack combos.
+#[derive(Component, Debug, Default)]
+pub struct ComboState {
+    /// Current index in the light combo chain
+    pub light_index: usize,
+    /// Current index in the heavy combo chain
+    pub heavy_index: usize,
+    /// Time remaining in combo window before reset
+    pub combo_window: f32,
+    /// Time remaining in current attack animation
+    pub attack_timer: f32,
+    /// Cooldown before next attack can be input
+    pub cooldown_timer: f32,
+    /// Which attack type is currently active
+    pub active_attack: Option<ActiveAttackType>,
+}
+
+/// The type of attack currently being executed
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveAttackType {
+    Light,
+    Heavy,
+    Special,
+    Parry,
+}
+
+// ============================================================================
+// Stance System
+// ============================================================================
+
+/// Stance meter for enemies - when depleted, enemy becomes vulnerable.
+/// Based on gameplay_defaults.ron: 4 heavies or 7 lights to break.
+#[derive(Component, Debug, Clone)]
+pub struct Stance {
+    /// Current stance points remaining
+    pub current: f32,
+    /// Maximum stance points
+    pub max: f32,
+    /// Timer for stance regeneration (regen 1 light worth per 10s)
+    pub regen_timer: f32,
+    /// Stance damage value of 1 light attack
+    pub light_stance_value: f32,
+    /// Stance damage value of 1 heavy attack
+    pub heavy_stance_value: f32,
+    /// If true, stance is broken and entity is vulnerable
+    pub is_broken: bool,
+    /// Duration of the stance break vulnerable state
+    pub break_duration: f32,
+    /// Timer for stance break recovery
+    pub break_timer: f32,
+}
+
+impl Stance {
+    /// Create stance with default game values.
+    /// Max stance = 7 lights = 4 heavies (from gameplay_defaults)
+    pub fn new() -> Self {
+        // 7 lights to break, so light value = 1, max = 7
+        // 4 heavies to break, so heavy value = 7/4 = 1.75
+        Self {
+            current: 7.0,
+            max: 7.0,
+            regen_timer: 0.0,
+            light_stance_value: 1.0,
+            heavy_stance_value: 1.75,
+            is_broken: false,
+            break_duration: 2.0, // 2 second vulnerability window
+            break_timer: 0.0,
+        }
+    }
+
+    /// Create stance from gameplay defaults
+    pub fn from_defaults(light_break: u32, heavy_break: u32, break_duration: f32) -> Self {
+        let max = light_break as f32;
+        let heavy_value = max / heavy_break as f32;
+        Self {
+            current: max,
+            max,
+            regen_timer: 0.0,
+            light_stance_value: 1.0,
+            heavy_stance_value: heavy_value,
+            is_broken: false,
+            break_duration,
+            break_timer: 0.0,
+        }
+    }
+
+    /// Apply stance damage. Returns true if stance was just broken.
+    pub fn take_damage(&mut self, amount: f32) -> bool {
+        if self.is_broken {
+            return false;
+        }
+        self.current = (self.current - amount).max(0.0);
+        self.regen_timer = 0.0; // Reset regen timer on hit
+        if self.current <= 0.0 {
+            self.is_broken = true;
+            self.break_timer = self.break_duration;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Regenerate stance over time
+    pub fn regenerate(&mut self, dt: f32, regen_rate: f32) {
+        if self.is_broken {
+            return;
+        }
+        self.regen_timer += dt;
+        // regen_rate is seconds per 1 light worth of stance (default 10.0)
+        if self.regen_timer >= regen_rate && self.current < self.max {
+            self.current = (self.current + 1.0).min(self.max);
+            self.regen_timer = 0.0;
+        }
+    }
+
+    /// Update break state timer
+    pub fn update_break(&mut self, dt: f32) {
+        if self.is_broken {
+            self.break_timer -= dt;
+            if self.break_timer <= 0.0 {
+                self.is_broken = false;
+                self.current = self.max; // Fully restore stance on recovery
+                self.regen_timer = 0.0;
+            }
+        }
+    }
+
+    /// Get stance as a percentage for UI
+    pub fn percent(&self) -> f32 {
+        self.current / self.max
+    }
+}
+
+impl Default for Stance {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// Parry System
+// ============================================================================
+
+/// Tracks parry state and timing window.
+#[derive(Component, Debug, Default)]
+pub struct ParryState {
+    /// Is the parry window currently active?
+    pub is_active: bool,
+    /// Time remaining in the parry window
+    pub window_timer: f32,
+    /// Cooldown before parry can be used again
+    pub cooldown_timer: f32,
+    /// Duration of the parry window (from moveset)
+    pub window_duration: f32,
+    /// Cooldown after parry attempt
+    pub cooldown_duration: f32,
+}
+
+impl ParryState {
+    pub fn new(window_duration: f32) -> Self {
+        Self {
+            is_active: false,
+            window_timer: 0.0,
+            cooldown_timer: 0.0,
+            window_duration,
+            cooldown_duration: 0.5, // Half second cooldown between parry attempts
+        }
+    }
+
+    /// Start a parry attempt
+    pub fn start_parry(&mut self) {
+        if self.cooldown_timer <= 0.0 {
+            self.is_active = true;
+            self.window_timer = self.window_duration;
+        }
+    }
+
+    /// Update parry timers
+    pub fn update(&mut self, dt: f32) {
+        if self.is_active {
+            self.window_timer -= dt;
+            if self.window_timer <= 0.0 {
+                self.is_active = false;
+                self.cooldown_timer = self.cooldown_duration;
+            }
+        } else if self.cooldown_timer > 0.0 {
+            self.cooldown_timer -= dt;
+        }
+    }
+
+    /// Check if parry is currently active and can deflect
+    pub fn can_parry(&self) -> bool {
+        self.is_active && self.window_timer > 0.0
+    }
+}
+
+/// Event emitted when a parry successfully deflects an attack
+#[derive(Debug)]
+pub struct ParrySuccessEvent {
+    pub parrier: Entity,
+    pub attacker: Entity,
+}
+
+impl Message for ParrySuccessEvent {}
+
+/// Event emitted when stance is broken
+#[derive(Debug)]
+pub struct StanceBreakEvent {
+    pub entity: Entity,
+    pub breaker: Entity,
+}
+
+impl Message for StanceBreakEvent {}
 
 // ============================================================================
 // Enemy AI
@@ -626,6 +909,7 @@ pub struct CombatInput {
     pub light_attack: bool,
     pub heavy_attack: bool,
     pub special_attack: bool,
+    pub parry: bool,
 }
 
 // ============================================================================
@@ -638,6 +922,7 @@ pub struct DamageEvent {
     pub target: Entity,
     pub amount: f32,
     pub knockback: Vec2,
+    pub stance_damage: f32,
 }
 
 impl Message for DamageEvent {}
@@ -682,28 +967,65 @@ impl Plugin for CombatPlugin {
             .add_message::<DeathEvent>()
             .add_message::<BossPhaseChangeEvent>()
             .add_message::<BossDefeatedEvent>()
+            .add_message::<ParrySuccessEvent>()
+            .add_message::<StanceBreakEvent>()
+            // Input and timer updates
             .add_systems(
                 Update,
                 (
                     read_combat_input,
                     update_combat_timers,
-                    process_player_attacks,
+                    update_combo_state,
+                    update_parry_state,
+                    update_stance,
+                )
+                    .chain(),
+            )
+            // Player combat systems
+            .add_systems(
+                Update,
+                (process_player_attacks_from_moveset, process_parry_input)
+                    .chain()
+                    .after(read_combat_input),
+            )
+            // Enemy AI systems
+            .add_systems(
+                Update,
+                (
                     update_enemy_ai,
                     update_boss_ai,
                     apply_enemy_movement,
                     apply_boss_movement,
                     process_enemy_attacks,
                     process_boss_attacks,
+                )
+                    .chain()
+                    .after(update_combat_timers),
+            )
+            // Collision and damage systems
+            .add_systems(
+                Update,
+                (
                     detect_hitbox_collisions,
+                    check_parry_collisions,
                     apply_damage,
+                    apply_stance_damage,
                     apply_knockback,
                     check_boss_phase_transitions,
+                    process_stance_breaks,
                     process_deaths,
-                    cleanup_expired_hitboxes,
-                    cleanup_telegraphs,
                 )
-                    .chain(),
-            );
+                    .chain()
+                    .after(process_enemy_attacks)
+                    .after(process_boss_attacks),
+            )
+            // Cleanup systems
+            .add_systems(
+                Update,
+                (cleanup_expired_hitboxes, cleanup_telegraphs).after(process_deaths),
+            )
+            // Coin drops on enemy death
+            .add_systems(Update, handle_enemy_coin_drops.after(process_deaths));
     }
 }
 
@@ -716,9 +1038,11 @@ impl Plugin for CombatPlugin {
 pub struct EnemyBundle {
     pub enemy: Enemy,
     pub tier: EnemyTier,
+    pub identity: EnemyIdentity,
     pub combatant: Combatant,
     pub team: Team,
     pub health: Health,
+    pub stance: Stance,
     pub stagger: Stagger,
     pub invulnerable: Invulnerable,
     pub ai: EnemyAI,
@@ -735,17 +1059,51 @@ pub struct EnemyBundle {
 }
 
 impl EnemyBundle {
-    pub fn new(tier: EnemyTier, position: Vec2, base_health: f32, _tuning: &EnemyTuning) -> Self {
+    pub fn new(
+        tier: EnemyTier,
+        position: Vec2,
+        base_health: f32,
+        _tuning: &EnemyTuning,
+        def_id: impl Into<String>,
+    ) -> Self {
         let (health_mult, _damage_mult, _speed_mult) = tier.stat_multipliers();
+        let effective_health = base_health * health_mult;
         let scale = tier.scale();
         let size = Vec2::new(32.0 * scale, 32.0 * scale);
+
+        // Scale stance based on tier - higher tiers have more stance
+        let stance = match tier {
+            EnemyTier::Minor => Stance::new(),
+            EnemyTier::Major => {
+                let mut s = Stance::new();
+                s.max *= 1.5;
+                s.current = s.max;
+                s
+            }
+            EnemyTier::Special => {
+                let mut s = Stance::new();
+                s.max *= 2.0;
+                s.current = s.max;
+                s.break_duration = 2.5;
+                s
+            }
+            EnemyTier::Boss => {
+                let mut s = Stance::new();
+                s.max *= 3.0;
+                s.current = s.max;
+                s.break_duration = 3.0;
+                s
+            }
+        };
 
         Self {
             enemy: Enemy,
             tier,
+            identity: EnemyIdentity::from_health(def_id, effective_health),
             combatant: Combatant,
             team: Team::Enemy,
-            health: Health::new(base_health * health_mult),
+            health: Health::new(effective_health),
+            stance,
             stagger: Stagger::default(),
             invulnerable: Invulnerable::default(),
             ai: EnemyAI {
@@ -763,7 +1121,10 @@ impl EnemyBundle {
             rigid_body: RigidBody::Dynamic,
             collider: Collider::rectangle(size.x, size.y),
             collision_events: CollisionEventsEnabled,
-            collision_layers: CollisionLayers::new(GameLayer::Enemy, [GameLayer::Ground, GameLayer::Wall, GameLayer::PlayerHitbox]),
+            collision_layers: CollisionLayers::new(
+                GameLayer::Enemy,
+                [GameLayer::Ground, GameLayer::Wall, GameLayer::PlayerHitbox],
+            ),
             velocity: LinearVelocity::default(),
             damping: LinearDamping(5.0), // High damping to quickly decay knockback velocity
             locked_axes: LockedAxes::ROTATION_LOCKED,
@@ -807,6 +1168,12 @@ pub fn spawn_boss_scaled(
     // Calculate final health with tier and difficulty multipliers
     let final_health = base_health * tier_health_mult * health_multiplier;
 
+    // Boss has triple stance
+    let mut stance = Stance::new();
+    stance.max *= 3.0;
+    stance.current = stance.max;
+    stance.break_duration = 3.0;
+
     commands
         .spawn((
             // Identity & Combat
@@ -816,11 +1183,16 @@ pub fn spawn_boss_scaled(
                 Combatant,
                 Team::Enemy,
                 Health::new(final_health),
+                stance,
                 Stagger::default(),
                 Invulnerable::default(),
             ),
             // Boss AI
-            (BossAI::default(), attack_slots, BossAttackCooldowns::default()),
+            (
+                BossAI::default(),
+                attack_slots,
+                BossAttackCooldowns::default(),
+            ),
             // Rendering
             (
                 Sprite {
@@ -835,7 +1207,10 @@ pub fn spawn_boss_scaled(
                 RigidBody::Dynamic,
                 Collider::rectangle(size.x, size.y),
                 CollisionEventsEnabled,
-                CollisionLayers::new(GameLayer::Enemy, [GameLayer::Ground, GameLayer::Wall, GameLayer::PlayerHitbox]),
+                CollisionLayers::new(
+                    GameLayer::Enemy,
+                    [GameLayer::Ground, GameLayer::Wall, GameLayer::PlayerHitbox],
+                ),
                 LinearVelocity::default(),
                 LinearDamping(3.0), // Moderate damping for bosses
                 LockedAxes::ROTATION_LOCKED,
@@ -868,6 +1243,8 @@ fn read_combat_input(keyboard: Res<ButtonInput<KeyCode>>, mut input: ResMut<Comb
         keyboard.just_pressed(KeyCode::KeyX) || keyboard.just_pressed(KeyCode::KeyI);
     input.special_attack =
         keyboard.just_pressed(KeyCode::KeyC) || keyboard.just_pressed(KeyCode::KeyO);
+    // Parry is on V/P keys
+    input.parry = keyboard.just_pressed(KeyCode::KeyV) || keyboard.just_pressed(KeyCode::KeyP);
 }
 
 fn update_combat_timers(
@@ -917,6 +1294,378 @@ fn update_combat_timers(
     }
 }
 
+/// Update combo state timers
+fn update_combo_state(time: Res<Time>, mut query: Query<&mut ComboState, With<Player>>) {
+    let dt = time.delta_secs();
+
+    for mut combo in &mut query {
+        // Update attack timer
+        if combo.attack_timer > 0.0 {
+            combo.attack_timer -= dt;
+            if combo.attack_timer <= 0.0 {
+                combo.active_attack = None;
+            }
+        }
+
+        // Update cooldown timer
+        if combo.cooldown_timer > 0.0 {
+            combo.cooldown_timer -= dt;
+        }
+
+        // Update combo window - reset indices when window expires
+        if combo.combo_window > 0.0 {
+            combo.combo_window -= dt;
+            if combo.combo_window <= 0.0 {
+                combo.light_index = 0;
+                combo.heavy_index = 0;
+            }
+        }
+    }
+}
+
+/// Update parry state timers
+fn update_parry_state(time: Res<Time>, mut query: Query<&mut ParryState, With<Player>>) {
+    let dt = time.delta_secs();
+    for mut parry in &mut query {
+        parry.update(dt);
+    }
+}
+
+/// Update stance meters for all enemies
+fn update_stance(
+    time: Res<Time>,
+    gameplay_defaults: Option<Res<GameplayDefaults>>,
+    mut query: Query<&mut Stance, With<Enemy>>,
+) {
+    let dt = time.delta_secs();
+    // Default regen rate: 1 light worth per 10 seconds
+    let regen_rate = gameplay_defaults
+        .map(|d| d.stance_defaults.regen_light_per_seconds)
+        .unwrap_or(10.0);
+
+    for mut stance in &mut query {
+        stance.update_break(dt);
+        stance.regenerate(dt, regen_rate);
+    }
+}
+
+/// Process player attacks using moveset data from ContentRegistry
+fn process_player_attacks_from_moveset(
+    mut commands: Commands,
+    input: Res<CombatInput>,
+    move_input: Res<MovementInput>,
+    registry: Option<Res<ContentRegistry>>,
+    mut query: Query<
+        (
+            Entity,
+            &Transform,
+            &MovementState,
+            &Weapon,
+            &PlayerMoveset,
+            &mut ComboState,
+            &Stagger,
+        ),
+        With<Player>,
+    >,
+) {
+    let Some(registry) = registry else {
+        return;
+    };
+
+    for (entity, transform, movement, weapon, player_moveset, mut combo, stagger) in &mut query {
+        // Can't attack while staggered or during active attack
+        if stagger.is_staggered() || combo.active_attack.is_some() {
+            continue;
+        }
+
+        // Can't attack during cooldown
+        if combo.cooldown_timer > 0.0 {
+            continue;
+        }
+
+        // Get the moveset from registry
+        let Some(moveset) = registry.movesets.get(&player_moveset.moveset_id) else {
+            warn!(
+                "Moveset '{}' not found in registry",
+                player_moveset.moveset_id
+            );
+            continue;
+        };
+
+        // Determine which attack type was input
+        let attack_input = if input.light_attack {
+            Some(ActiveAttackType::Light)
+        } else if input.heavy_attack {
+            Some(ActiveAttackType::Heavy)
+        } else if input.special_attack {
+            Some(ActiveAttackType::Special)
+        } else {
+            None
+        };
+
+        let Some(attack_type) = attack_input else {
+            continue;
+        };
+
+        // Get the strike data based on attack type and combo position
+        let (strike, new_combo_index, is_light, is_heavy) = match attack_type {
+            ActiveAttackType::Light => {
+                let combo_def = &moveset.light_combo;
+                let strike = &combo_def.strikes[combo.light_index];
+                let next_index = if combo.light_index + 1 >= combo_def.strikes.len() {
+                    combo_def.loop_from
+                } else {
+                    combo.light_index + 1
+                };
+                (strike, next_index, true, false)
+            }
+            ActiveAttackType::Heavy => {
+                let combo_def = &moveset.heavy_combo;
+                let strike = &combo_def.strikes[combo.heavy_index];
+                let next_index = if combo.heavy_index + 1 >= combo_def.strikes.len() {
+                    combo_def.loop_from
+                } else {
+                    combo.heavy_index + 1
+                };
+                (strike, next_index, false, true)
+            }
+            ActiveAttackType::Special => {
+                // Special doesn't have a combo chain
+                (&moveset.special, 0, false, false)
+            }
+            ActiveAttackType::Parry => continue, // Parry handled separately
+        };
+
+        // Determine attack direction based on input
+        let direction = if move_input.axis.y > 0.5 {
+            AttackDirection::Up
+        } else if move_input.axis.y < -0.5 {
+            AttackDirection::Down
+        } else {
+            match movement.facing {
+                Facing::Right => AttackDirection::Right,
+                Facing::Left => AttackDirection::Left,
+            }
+        };
+
+        // Apply weapon multipliers
+        let damage = strike.damage * weapon.damage_multiplier;
+        let knockback = 150.0 * weapon.knockback_multiplier; // Base knockback
+        let stance_damage = strike.stance_damage;
+
+        // Set combo state
+        combo.active_attack = Some(attack_type);
+        combo.attack_timer = strike.cooldown * 0.8; // Attack animation time
+        combo.cooldown_timer = strike.cooldown;
+        combo.combo_window = 0.5; // Half second to continue combo
+
+        // Update combo index
+        if is_light {
+            combo.light_index = new_combo_index;
+        } else if is_heavy {
+            combo.heavy_index = new_combo_index;
+        }
+
+        // Calculate hitbox position and size from strike data
+        let hitbox_offset = direction.to_offset(strike.hitbox.offset);
+        let hitbox_pos = transform.translation.truncate() + hitbox_offset;
+        let hitbox_size = direction.hitbox_size(strike.hitbox.length, strike.hitbox.width);
+
+        // Visual color based on attack type
+        let color = match attack_type {
+            ActiveAttackType::Light => Color::srgba(1.0, 1.0, 0.0, 0.5),
+            ActiveAttackType::Heavy => Color::srgba(1.0, 0.6, 0.0, 0.5),
+            ActiveAttackType::Special => Color::srgba(0.8, 0.2, 1.0, 0.5),
+            ActiveAttackType::Parry => Color::srgba(0.2, 0.8, 1.0, 0.5),
+        };
+
+        // Spawn hitbox
+        commands.spawn((
+            Hitbox {
+                damage,
+                knockback,
+                stance_damage,
+                owner: entity,
+                hit_entities: Vec::new(),
+            },
+            Team::Player,
+            HitboxLifetime(strike.cooldown * 0.6),
+            Sprite {
+                color,
+                custom_size: Some(hitbox_size),
+                ..default()
+            },
+            Transform::from_xyz(hitbox_pos.x, hitbox_pos.y, 1.0),
+            Collider::rectangle(hitbox_size.x, hitbox_size.y),
+            Sensor,
+            CollisionEventsEnabled,
+            CollisionLayers::new(GameLayer::PlayerHitbox, [GameLayer::Enemy]),
+        ));
+
+        debug!(
+            "Player attack: {:?} with strike '{}', damage={}, stance_damage={}",
+            attack_type, strike.id, damage, stance_damage
+        );
+    }
+}
+
+/// Process parry input
+fn process_parry_input(
+    input: Res<CombatInput>,
+    registry: Option<Res<ContentRegistry>>,
+    mut query: Query<(&PlayerMoveset, &mut ParryState, &mut ComboState, &Stagger), With<Player>>,
+) {
+    if !input.parry {
+        return;
+    }
+
+    let Some(registry) = registry else {
+        return;
+    };
+
+    for (player_moveset, mut parry, mut combo, stagger) in &mut query {
+        // Can't parry while staggered or during other actions
+        if stagger.is_staggered() || combo.active_attack.is_some() {
+            continue;
+        }
+
+        // Get parry window from moveset
+        let Some(moveset) = registry.movesets.get(&player_moveset.moveset_id) else {
+            continue;
+        };
+
+        if !moveset.parry.enabled {
+            continue;
+        }
+
+        // Set parry window duration from moveset
+        parry.window_duration = moveset.parry.window_seconds;
+        parry.start_parry();
+
+        // Set combo state to parry
+        combo.active_attack = Some(ActiveAttackType::Parry);
+        combo.attack_timer = moveset.parry.window_seconds + 0.1;
+
+        debug!(
+            "Player parry started with window {}s",
+            moveset.parry.window_seconds
+        );
+    }
+}
+
+/// Check for parry collisions with incoming enemy attacks
+fn check_parry_collisions(
+    mut collision_events: MessageReader<CollisionStart>,
+    mut parry_events: MessageWriter<ParrySuccessEvent>,
+    mut stance_break_events: MessageWriter<StanceBreakEvent>,
+    gameplay_defaults: Option<Res<GameplayDefaults>>,
+    parry_query: Query<(Entity, &ParryState), With<Player>>,
+    hitbox_query: Query<(&Hitbox, &Team)>,
+    mut enemy_stance_query: Query<&mut Stance, With<Enemy>>,
+) {
+    // Parry deals 8 heavies worth of stance damage by default
+    let parry_stance_damage = gameplay_defaults
+        .map(|d| {
+            let heavy_value = d.stance_defaults.light_break_count as f32
+                / d.stance_defaults.heavy_break_count as f32;
+            heavy_value * d.stance_defaults.parry_heavy_equivalent as f32
+        })
+        .unwrap_or(14.0); // 8 * 1.75 = 14
+
+    for event in collision_events.read() {
+        let pairs = [
+            (event.collider1, event.collider2),
+            (event.collider2, event.collider1),
+        ];
+
+        for (player_entity, hitbox_entity) in pairs {
+            // Check if this is a player with active parry
+            let Ok((player, parry)) = parry_query.get(player_entity) else {
+                continue;
+            };
+
+            if !parry.can_parry() {
+                continue;
+            }
+
+            // Check if colliding with enemy hitbox
+            let Ok((hitbox, team)) = hitbox_query.get(hitbox_entity) else {
+                continue;
+            };
+
+            if *team != Team::Enemy {
+                continue;
+            }
+
+            // Parry successful! Apply massive stance damage to attacker
+            if let Ok(mut stance) = enemy_stance_query.get_mut(hitbox.owner) {
+                let broke = stance.take_damage(parry_stance_damage);
+                if broke {
+                    stance_break_events.write(StanceBreakEvent {
+                        entity: hitbox.owner,
+                        breaker: player,
+                    });
+                }
+            }
+
+            parry_events.write(ParrySuccessEvent {
+                parrier: player,
+                attacker: hitbox.owner,
+            });
+
+            info!(
+                "Parry successful! Applied {} stance damage to attacker",
+                parry_stance_damage
+            );
+        }
+    }
+}
+
+/// Apply stance damage from damage events
+fn apply_stance_damage(
+    mut damage_events: MessageReader<DamageEvent>,
+    mut stance_break_events: MessageWriter<StanceBreakEvent>,
+    mut stance_query: Query<&mut Stance>,
+) {
+    for event in damage_events.read() {
+        if event.stance_damage <= 0.0 {
+            continue;
+        }
+
+        if let Ok(mut stance) = stance_query.get_mut(event.target) {
+            let broke = stance.take_damage(event.stance_damage);
+            if broke {
+                stance_break_events.write(StanceBreakEvent {
+                    entity: event.target,
+                    breaker: event.source,
+                });
+                info!(
+                    "Stance broken on entity {:?} by {:?}!",
+                    event.target, event.source
+                );
+            }
+        }
+    }
+}
+
+/// Process stance break events - apply stagger to broken enemies
+fn process_stance_breaks(
+    mut stance_break_events: MessageReader<StanceBreakEvent>,
+    mut query: Query<(&mut Stagger, &Stance)>,
+) {
+    for event in stance_break_events.read() {
+        if let Ok((mut stagger, stance)) = query.get_mut(event.entity) {
+            // Apply long stagger equal to break duration
+            stagger.timer = stance.break_duration;
+            info!(
+                "Entity {:?} staggered for {}s from stance break",
+                event.entity, stance.break_duration
+            );
+        }
+    }
+}
+
+#[allow(dead_code)]
 fn process_player_attacks(
     mut commands: Commands,
     input: Res<CombatInput>,
@@ -994,10 +1743,18 @@ fn process_player_attacks(
                 AttackType::Special => Color::srgba(0.8, 0.2, 1.0, 0.5),
             };
 
+            // Default stance damage based on attack type
+            let stance_damage = match attack {
+                AttackType::Light => 1.0,
+                AttackType::Heavy => 1.75,
+                AttackType::Special => 3.0,
+            };
+
             commands.spawn((
                 Hitbox {
                     damage,
                     knockback,
+                    stance_damage,
                     owner: entity,
                     hit_entities: Vec::new(),
                 },
@@ -1295,7 +2052,10 @@ fn apply_enemy_movement(
 
 fn apply_boss_movement(
     player_query: Query<&Transform, With<Player>>,
-    mut boss_query: Query<(&Transform, &mut LinearVelocity, &BossAI), (With<Enemy>, Without<Player>)>,
+    mut boss_query: Query<
+        (&Transform, &mut LinearVelocity, &BossAI),
+        (With<Enemy>, Without<Player>),
+    >,
 ) {
     let Some(player_transform) = player_query.iter().next() else {
         return;
@@ -1337,6 +2097,7 @@ fn process_enemy_attacks(
                 Hitbox {
                     damage: tuning.attack_damage * damage_mult,
                     knockback: tuning.attack_knockback * damage_mult,
+                    stance_damage: 0.0, // Enemies don't deal stance damage to player
                     owner: entity,
                     hit_entities: Vec::new(),
                 },
@@ -1407,6 +2168,7 @@ fn process_boss_attacks(
                 Hitbox {
                     damage: *damage,
                     knockback: *knockback,
+                    stance_damage: 0.0, // Bosses don't deal stance damage to player
                     owner: entity,
                     hit_entities: Vec::new(),
                 },
@@ -1440,8 +2202,12 @@ fn detect_hitbox_collisions(
         ];
 
         for (hitbox_entity, target_entity) in pairs {
-            if let Ok((mut hitbox, hitbox_team, hitbox_transform)) = hitbox_query.get_mut(hitbox_entity) {
-                if let Ok((target, target_team, invuln, target_transform)) = target_query.get(target_entity) {
+            if let Ok((mut hitbox, hitbox_team, hitbox_transform)) =
+                hitbox_query.get_mut(hitbox_entity)
+            {
+                if let Ok((target, target_team, invuln, target_transform)) =
+                    target_query.get(target_entity)
+                {
                     if hitbox_team == target_team {
                         continue;
                     }
@@ -1476,6 +2242,7 @@ fn detect_hitbox_collisions(
                         target,
                         amount: hitbox.damage,
                         knockback: knockback_dir * hitbox.knockback,
+                        stance_damage: hitbox.stance_damage,
                     });
                 }
             }
@@ -1557,16 +2324,60 @@ fn process_deaths(
     mut death_events: MessageReader<DeathEvent>,
     mut boss_defeated_events: MessageWriter<BossDefeatedEvent>,
     mut boss_state: ResMut<BossEncounterState>,
-    enemy_query: Query<(Entity, Option<&BossAI>), With<Enemy>>,
+    mut segment_progress: ResMut<SegmentProgress>,
+    enemy_query: Query<(Entity, Option<&BossAI>, Option<&EnemyIdentity>), With<Enemy>>,
 ) {
     for event in death_events.read() {
-        if let Ok((entity, boss_ai)) = enemy_query.get(event.entity) {
+        if let Ok((entity, boss_ai, identity)) = enemy_query.get(event.entity) {
+            // Track significant enemy deaths for no-repeat logic
+            if let Some(id) = identity {
+                if id.is_significant {
+                    segment_progress
+                        .encountered_significant_enemies
+                        .insert(id.def_id.clone());
+                    info!(
+                        "Significant enemy '{}' defeated and tracked for no-repeat",
+                        id.def_id
+                    );
+                }
+            }
+
             if boss_ai.is_some() {
                 // Boss defeated
                 boss_state.boss_defeated();
                 boss_defeated_events.write(BossDefeatedEvent { boss: entity });
             }
             commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// Drop coins when enemies die based on their tier
+fn handle_enemy_coin_drops(
+    mut death_events: MessageReader<DeathEvent>,
+    enemy_query: Query<&EnemyTier, With<Enemy>>,
+    mut coin_events: MessageWriter<CoinGainedEvent>,
+) {
+    for event in death_events.read() {
+        if let Ok(tier) = enemy_query.get(event.entity) {
+            // Base coin value by tier
+            let base_coins = match tier {
+                EnemyTier::Minor => 5,
+                EnemyTier::Major => 12,
+                EnemyTier::Special => 25,
+                EnemyTier::Boss => 0, // Boss coins handled separately in rewards
+            };
+
+            if base_coins > 0 {
+                // Add small random variance (+/- 2 coins)
+                let variance = (rand::random::<u32>() % 5) as i32 - 2;
+                let coins = (base_coins as i32 + variance).max(1) as u32;
+
+                coin_events.write(CoinGainedEvent {
+                    amount: coins,
+                    source: CoinSource::EnemyDrop,
+                });
+            }
         }
     }
 }

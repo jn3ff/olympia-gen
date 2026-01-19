@@ -1,6 +1,9 @@
 mod combat;
 mod content;
 mod core;
+#[cfg(feature = "dev-tools")]
+mod debug;
+mod encounters;
 mod movement;
 mod rewards;
 mod rooms;
@@ -10,25 +13,31 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Olympia".to_string(),
-                resolution: (1280, 720).into(),
-                resizable: true,
-                ..default()
-            }),
+    let mut app = App::new();
+
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "Olympia".to_string(),
+            resolution: (1280, 720).into(),
+            resizable: true,
             ..default()
-        }))
-        .add_plugins(PhysicsPlugins::default())
-        .add_plugins((
-            core::CorePlugin,
-            content::ContentPlugin,
-            movement::MovementPlugin,
-            combat::CombatPlugin,
-            rooms::RoomsPlugin,
-            rewards::RewardsPlugin,
-            ui::UiPlugin,
-        ))
-        .run();
+        }),
+        ..default()
+    }))
+    .add_plugins(PhysicsPlugins::default())
+    .add_plugins((
+        core::CorePlugin,
+        content::ContentPlugin,
+        movement::MovementPlugin,
+        combat::CombatPlugin,
+        rooms::RoomsPlugin,
+        rewards::RewardsPlugin,
+        encounters::EncountersPlugin,
+        ui::UiPlugin,
+    ));
+
+    #[cfg(feature = "dev-tools")]
+    app.add_plugins(debug::DebugPlugin);
+
+    app.run();
 }

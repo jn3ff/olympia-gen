@@ -9,6 +9,10 @@ The project is a Rust/Bevy game prototype. Core wiring happens in `src/main.rs`,
 - `cargo check` — fast type-checking pass during iteration.
 - `cargo test` — run unit/integration tests (none exist yet, but use this when adding tests).
 
+## Task Tracking
+
+Use 'bd' for task tracking
+
 ## Coding Style & Naming Conventions
 Use standard Rust style: 4-space indentation, `snake_case` for functions/fields, `PascalCase` for types and enums, and `SCREAMING_SNAKE_CASE` for constants. Bevy patterns are preferred: ECS types should be named clearly (`Component`, `Resource`, `Event` derivations), and plugin structs should follow `XxxPlugin` naming. Module boundaries map to gameplay domains; keep new systems in the most relevant module and expose only necessary types.
 
@@ -36,3 +40,29 @@ For PRs, include:
 - Encounters: one specialty tag guaranteed; curated tags tied to weapons; buff tags scale with tier.
 - Debug mode must support spawn, apply build templates, and invincible toggle (seed optional).
 - Implementation roadmap lives in `PLAN.md`.
+
+## Landing the Plane (Session Completion)
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd sync
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds

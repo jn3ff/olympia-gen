@@ -1,6 +1,8 @@
 (
   schema_version: 1,
   items: [
+    // ==================== HELMETS ====================
+    // Tier 1
     (
       id: "armor_helmet_cloth",
       name: "Cloth Hood",
@@ -8,12 +10,71 @@
       tier: 1,
       base_stats: (
         max_health_bonus: 5.0,
-        damage_reduction: 0.0,
+        damage_reduction: 0.01,
       ),
       passive_slots: 1,
       base_passives: [],
       tags: ["starter"],
     ),
+    // Tier 2
+    (
+      id: "armor_helmet_leather",
+      name: "Leather Cap",
+      slot: Helmet,
+      tier: 2,
+      base_stats: (
+        max_health_bonus: 10.0,
+        damage_reduction: 0.02,
+      ),
+      passive_slots: 2,
+      base_passives: [],
+      tags: [],
+    ),
+    // Tier 3
+    (
+      id: "armor_helmet_iron",
+      name: "Iron Helm",
+      slot: Helmet,
+      tier: 3,
+      base_stats: (
+        max_health_bonus: 18.0,
+        damage_reduction: 0.04,
+      ),
+      passive_slots: 3,
+      base_passives: [],
+      tags: [],
+    ),
+    // Tier 4
+    (
+      id: "armor_helmet_bronze",
+      name: "Bronze Warhelm",
+      slot: Helmet,
+      tier: 4,
+      base_stats: (
+        max_health_bonus: 28.0,
+        damage_reduction: 0.06,
+      ),
+      passive_slots: 4,
+      base_passives: [],
+      tags: ["elite"],
+    ),
+    // Tier 5
+    (
+      id: "armor_helmet_olympian",
+      name: "Olympian Visage",
+      slot: Helmet,
+      tier: 5,
+      base_stats: (
+        max_health_bonus: 40.0,
+        damage_reduction: 0.08,
+      ),
+      passive_slots: 5,
+      base_passives: [],
+      tags: ["legendary", "divine"],
+    ),
+
+    // ==================== CHESTPLATES ====================
+    // Tier 1
     (
       id: "armor_chest_leather",
       name: "Leather Cuirass",
@@ -26,6 +87,278 @@
       passive_slots: 1,
       base_passives: [],
       tags: ["starter"],
+    ),
+    // Tier 2
+    (
+      id: "armor_chest_studded",
+      name: "Studded Armor",
+      slot: Chestplate,
+      tier: 2,
+      base_stats: (
+        max_health_bonus: 20.0,
+        damage_reduction: 0.04,
+      ),
+      passive_slots: 2,
+      base_passives: [],
+      tags: [],
+    ),
+    // Tier 3
+    (
+      id: "armor_chest_chainmail",
+      name: "Chainmail Hauberk",
+      slot: Chestplate,
+      tier: 3,
+      base_stats: (
+        max_health_bonus: 35.0,
+        damage_reduction: 0.07,
+      ),
+      passive_slots: 3,
+      base_passives: [],
+      tags: [],
+    ),
+    // Tier 4
+    (
+      id: "armor_chest_plate",
+      name: "Bronze Breastplate",
+      slot: Chestplate,
+      tier: 4,
+      base_stats: (
+        max_health_bonus: 50.0,
+        damage_reduction: 0.10,
+      ),
+      passive_slots: 4,
+      base_passives: [],
+      tags: ["elite"],
+    ),
+    // Tier 5
+    (
+      id: "armor_chest_aegis",
+      name: "Aegis of the Gods",
+      slot: Chestplate,
+      tier: 5,
+      base_stats: (
+        max_health_bonus: 70.0,
+        damage_reduction: 0.14,
+      ),
+      passive_slots: 5,
+      base_passives: [],
+      tags: ["legendary", "divine"],
+    ),
+
+    // ==================== GLOVES ====================
+    // Tier 1
+    (
+      id: "armor_gloves_cloth",
+      name: "Cloth Wraps",
+      slot: Gloves,
+      tier: 1,
+      base_stats: (
+        max_health_bonus: 3.0,
+        damage_reduction: 0.005,
+      ),
+      passive_slots: 1,
+      base_passives: [],
+      tags: ["starter"],
+    ),
+    // Tier 2
+    (
+      id: "armor_gloves_leather",
+      name: "Leather Bracers",
+      slot: Gloves,
+      tier: 2,
+      base_stats: (
+        max_health_bonus: 6.0,
+        damage_reduction: 0.01,
+      ),
+      passive_slots: 2,
+      base_passives: [],
+      tags: [],
+    ),
+    // Tier 3
+    (
+      id: "armor_gloves_chain",
+      name: "Chain Gauntlets",
+      slot: Gloves,
+      tier: 3,
+      base_stats: (
+        max_health_bonus: 12.0,
+        damage_reduction: 0.02,
+      ),
+      passive_slots: 3,
+      base_passives: [],
+      tags: [],
+    ),
+    // Tier 4
+    (
+      id: "armor_gloves_bronze",
+      name: "Bronze Vambraces",
+      slot: Gloves,
+      tier: 4,
+      base_stats: (
+        max_health_bonus: 18.0,
+        damage_reduction: 0.03,
+      ),
+      passive_slots: 4,
+      base_passives: [],
+      tags: ["elite"],
+    ),
+    // Tier 5
+    (
+      id: "armor_gloves_titans",
+      name: "Titan's Grip",
+      slot: Gloves,
+      tier: 5,
+      base_stats: (
+        max_health_bonus: 25.0,
+        damage_reduction: 0.05,
+      ),
+      passive_slots: 5,
+      base_passives: [],
+      tags: ["legendary", "divine"],
+    ),
+
+    // ==================== BOOTS ====================
+    // Tier 1
+    (
+      id: "armor_boots_sandals",
+      name: "Simple Sandals",
+      slot: Boots,
+      tier: 1,
+      base_stats: (
+        max_health_bonus: 3.0,
+        damage_reduction: 0.005,
+      ),
+      passive_slots: 1,
+      base_passives: [],
+      tags: ["starter"],
+    ),
+    // Tier 2
+    (
+      id: "armor_boots_leather",
+      name: "Leather Boots",
+      slot: Boots,
+      tier: 2,
+      base_stats: (
+        max_health_bonus: 6.0,
+        damage_reduction: 0.01,
+      ),
+      passive_slots: 2,
+      base_passives: [],
+      tags: [],
+    ),
+    // Tier 3
+    (
+      id: "armor_boots_iron",
+      name: "Iron Greaves",
+      slot: Boots,
+      tier: 3,
+      base_stats: (
+        max_health_bonus: 12.0,
+        damage_reduction: 0.02,
+      ),
+      passive_slots: 3,
+      base_passives: [],
+      tags: [],
+    ),
+    // Tier 4
+    (
+      id: "armor_boots_bronze",
+      name: "Bronze Sabatons",
+      slot: Boots,
+      tier: 4,
+      base_stats: (
+        max_health_bonus: 18.0,
+        damage_reduction: 0.03,
+      ),
+      passive_slots: 4,
+      base_passives: [],
+      tags: ["elite"],
+    ),
+    // Tier 5
+    (
+      id: "armor_boots_hermes",
+      name: "Winged Sandals",
+      slot: Boots,
+      tier: 5,
+      base_stats: (
+        max_health_bonus: 25.0,
+        damage_reduction: 0.05,
+      ),
+      passive_slots: 5,
+      base_passives: [],
+      tags: ["legendary", "divine", "hermes"],
+    ),
+
+    // ==================== ACCESSORIES ====================
+    // Tier 1
+    (
+      id: "accessory_ring_copper",
+      name: "Copper Ring",
+      slot: Accessory,
+      tier: 1,
+      base_stats: (
+        max_health_bonus: 5.0,
+        damage_reduction: 0.0,
+      ),
+      passive_slots: 1,
+      base_passives: [],
+      tags: ["starter"],
+    ),
+    // Tier 2
+    (
+      id: "accessory_amulet_silver",
+      name: "Silver Amulet",
+      slot: Accessory,
+      tier: 2,
+      base_stats: (
+        max_health_bonus: 10.0,
+        damage_reduction: 0.01,
+      ),
+      passive_slots: 2,
+      base_passives: [],
+      tags: [],
+    ),
+    // Tier 3
+    (
+      id: "accessory_charm_blessed",
+      name: "Blessed Charm",
+      slot: Accessory,
+      tier: 3,
+      base_stats: (
+        max_health_bonus: 18.0,
+        damage_reduction: 0.02,
+      ),
+      passive_slots: 3,
+      base_passives: [],
+      tags: ["blessed"],
+    ),
+    // Tier 4
+    (
+      id: "accessory_pendant_golden",
+      name: "Golden Pendant",
+      slot: Accessory,
+      tier: 4,
+      base_stats: (
+        max_health_bonus: 28.0,
+        damage_reduction: 0.03,
+      ),
+      passive_slots: 4,
+      base_passives: [],
+      tags: ["elite"],
+    ),
+    // Tier 5
+    (
+      id: "accessory_crown_olympus",
+      name: "Crown of Olympus",
+      slot: Accessory,
+      tier: 5,
+      base_stats: (
+        max_health_bonus: 40.0,
+        damage_reduction: 0.05,
+      ),
+      passive_slots: 5,
+      base_passives: [],
+      tags: ["legendary", "divine"],
     ),
   ],
 )

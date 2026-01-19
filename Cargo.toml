@@ -3,6 +3,10 @@ name = "olympia-gen"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["dev-tools"]
+dev-tools = []
+
 [dependencies]
 bevy = "0.18"
 avian2d = "0.5"
