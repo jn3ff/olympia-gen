@@ -19,6 +19,13 @@ All shortcuts use `Ctrl+Key` and work whether the debug panel is open or closed.
 | `Ctrl+I` | Toggle invincibility (auto-heals, permanent i-frames) |
 | `Ctrl+H` | Full heal |
 
+### Cheats
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+M` | Give money (+500 coins) |
+| `Ctrl+K` | Kill all enemies in current room (instakill) |
+
 ### Spawning
 
 | Shortcut | Action |
@@ -48,12 +55,27 @@ Spawned enemies use current difficulty scaling based on segment index.
 
 When enabled (`Ctrl+D`), displays real-time info in the bottom-left:
 
-- Player position (x, y)
+### Player
+- Position (x, y)
 - Health (current/max)
-- Run seed
+- Coins
+- Invincibility status
+
+### Run
+- Seed
 - Segment index
 - Current RunState
-- Invincibility status
+
+### Progress
+- Rooms cleared (this segment)
+- Bosses defeated (this segment)
+- Total bosses defeated (entire run)
+
+### Room
+- Current room ID
+- Current biome
+- Enemy count (alive in room)
+- Total rooms cleared
 
 ## Reproducibility
 
