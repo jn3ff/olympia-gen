@@ -131,6 +131,7 @@ impl PortalCondition {
 #[derive(Debug, Clone)]
 pub struct RoomData {
     pub id: String,
+    #[allow(dead_code)]
     pub name: String,
     pub exits: Vec<Direction>,
     /// Optional per-exit configuration. If provided, overrides the default condition for exits.

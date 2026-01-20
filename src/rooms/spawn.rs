@@ -98,43 +98,28 @@ pub(crate) fn spawn_arena_hub(
     ));
 
     // Arena portals (4 directions)
-    let portal_positions = [
-        (Direction::Up, Vec2::new(0.0, 150.0)),
-        (Direction::Down, Vec2::new(0.0, -150.0)),
-        (Direction::Left, Vec2::new(-250.0, -50.0)),
-        (Direction::Right, Vec2::new(250.0, -50.0)),
+    // Positioned flush with walls:
+    // - Walls are at x=±320 with 40px thickness, inner edge at x=±300
+    // - Ground at y=-150 with 40px height, top at y=-130
+    // - Left/Right portals embedded in walls at ground level
+    // - Up/Down portals not used in arena (no ceiling/floor gaps)
+    let portal_configs = [
+        (Direction::Left, Vec2::new(-300.0, -100.0), Vec2::new(40.0, 80.0)),
+        (Direction::Right, Vec2::new(300.0, -100.0), Vec2::new(40.0, 80.0)),
     ];
 
-    for (direction, pos) in portal_positions {
-        let visual_size = match direction {
-            Direction::Up | Direction::Down => Vec2::new(80.0, 30.0),
-            Direction::Left | Direction::Right => Vec2::new(30.0, 80.0),
-        };
-
-        let collider_size = match direction {
-            Direction::Up | Direction::Down => Vec2::new(80.0, 60.0),
-            Direction::Left | Direction::Right => Vec2::new(60.0, 80.0),
-        };
-
-        // Portal visual
-        let mut portal_cmd = commands.spawn((
-            ArenaPortal { direction },
-            Sprite {
-                color: portal_color,
-                custom_size: Some(visual_size),
-                ..default()
-            },
-            Transform::from_xyz(pos.x, pos.y, 0.0),
-        ));
-
-        // Enable all portals by default (can add logic later)
-        portal_cmd.insert(PortalEnabled);
-
-        // Portal sensor
+    for (direction, pos, size) in portal_configs {
+        // Combined visual + sensor entity (like room portals)
         commands.spawn((
             ArenaPortal { direction },
-            Transform::from_xyz(pos.x, pos.y, 0.0),
-            Collider::rectangle(collider_size.x, collider_size.y),
+            PortalEnabled,
+            Sprite {
+                color: portal_color,
+                custom_size: Some(size),
+                ..default()
+            },
+            Transform::from_xyz(pos.x, pos.y, 0.5),
+            Collider::rectangle(size.x + 40.0, size.y), // Extend collider inward for interaction
             Sensor,
             CollisionEventsEnabled,
             CollisionLayers::new(GameLayer::Sensor, [GameLayer::Player]),
@@ -226,7 +211,7 @@ pub(crate) fn spawn_shop_npcs(commands: &mut Commands) {
 
 pub(crate) fn spawn_current_room(
     mut commands: Commands,
-    room_graph: Res<RoomGraph>,
+    mut room_graph: ResMut<RoomGraph>,
     registry: Res<RoomRegistry>,
     boss_config: Res<BossConfig>,
     mut boss_state: ResMut<BossEncounterState>,
@@ -237,7 +222,8 @@ pub(crate) fn spawn_current_room(
     segment_progress: Res<SegmentProgress>,
     mut player_query: Query<&mut Transform, With<Player>>,
 ) {
-    let Some(transition) = &room_graph.pending_transition else {
+    // Take the pending transition - this consumes it so we don't re-use it
+    let Some(transition) = room_graph.pending_transition.take() else {
         // No transition pending, spawn default room
         spawn_room_geometry(
             &mut commands,
@@ -248,6 +234,9 @@ pub(crate) fn spawn_current_room(
         );
         return;
     };
+
+    // Track that we've entered this room
+    room_graph.current_room_id = Some(transition.to_room.clone());
 
     // Find room data
     let room_data = registry

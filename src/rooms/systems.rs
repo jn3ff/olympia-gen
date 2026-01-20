@@ -361,7 +361,19 @@ fn generate_room_sequence(
 
     let mut rng = rand::rng();
 
+    // Helper to check if a room has the required entry exit
+    let room_has_entry = |room_id: &str| -> bool {
+        registry
+            .rooms
+            .iter()
+            .find(|r| r.id == room_id)
+            .map(|r| r.exits.contains(&entry_direction))
+            .unwrap_or(false)
+    };
+
     // Select rooms from segment pool (or registry as fallback)
+    // IMPORTANT: Only select rooms that have an exit matching entry_direction,
+    // otherwise the player will spawn facing a solid wall!
     let mut available_rooms: Vec<String> = if !segment_progress.room_pool.is_empty() {
         segment_progress
             .room_pool
@@ -370,6 +382,7 @@ fn generate_room_sequence(
                 !segment_progress
                     .encountered_significant_enemies
                     .contains(*id)
+                    && room_has_entry(id)
             })
             .cloned()
             .collect()
@@ -377,7 +390,7 @@ fn generate_room_sequence(
         registry
             .rooms
             .iter()
-            .filter(|r| !r.boss_room)
+            .filter(|r| !r.boss_room && r.exits.contains(&entry_direction))
             .map(|r| r.id.clone())
             .collect()
     };
@@ -429,7 +442,6 @@ pub(crate) fn cleanup_room(
         )>,
     >,
     mut player_query: Query<Entity, With<Player>>,
-    mut room_graph: ResMut<RoomGraph>,
 ) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
@@ -442,10 +454,8 @@ pub(crate) fn cleanup_room(
             .remove::<PlayerInPortalZone>();
     }
 
-    // Clear pending transition after room is cleaned up
-    if let Some(transition) = room_graph.pending_transition.take() {
-        room_graph.current_room_id = Some(transition.to_room);
-    }
+    // NOTE: Don't consume pending_transition here - spawn_current_room needs it!
+    // The transition is consumed after spawn_current_room uses it.
 }
 
 /// Tracks when the player enters/exits portal interaction zones.
@@ -900,6 +910,32 @@ pub(crate) fn emit_encounter_completed(
         encounter_completed_events.write(EncounterCompletedEvent {
             room_id: event.room_id.clone(),
         });
+    }
+}
+
+/// Update progress tracking when a room is cleared.
+pub(crate) fn update_progress_on_room_clear(
+    mut room_cleared_events: MessageReader<RoomClearedEvent>,
+    mut room_graph: ResMut<RoomGraph>,
+    mut segment_progress: ResMut<SegmentProgress>,
+) {
+    for event in room_cleared_events.read() {
+        // Track room as cleared in room graph
+        if !room_graph.rooms_cleared.contains(&event.room_id) {
+            room_graph.rooms_cleared.push(event.room_id.clone());
+            info!(
+                "Room '{}' added to cleared list (total: {})",
+                event.room_id,
+                room_graph.rooms_cleared.len()
+            );
+        }
+
+        // Increment segment progress counter
+        segment_progress.rooms_cleared_this_segment += 1;
+        info!(
+            "Segment progress: {}/{} rooms cleared",
+            segment_progress.rooms_cleared_this_segment, 5 // TODO: get from config
+        );
     }
 }
 

@@ -1,11 +1,15 @@
 //! Debug domain: debug systems for input and runtime tweaks.
 
+use bevy::ecs::message::MessageWriter;
 use bevy::prelude::*;
 
 use crate::combat::{
-    BossAttackSlots, EnemyBundle, EnemyTier, EnemyTuning, Health, Invulnerable, spawn_boss_scaled,
+    BossAttackSlots, DeathEvent, Enemy, EnemyBundle, EnemyTier, EnemyTuning, Health, Invulnerable,
+    spawn_boss_scaled,
 };
-use crate::core::{DifficultyScaling, RunConfig, RunState};
+use crate::core::{DifficultyScaling, RunConfig, RunState, SegmentProgress};
+use crate::rewards::PlayerWallet;
+use crate::rooms::RoomGraph;
 use crate::debug::state::{DebugAction, DebugState};
 use crate::debug::ui::{
     DebugButton, DebugInfoOverlay, DebugUI, refresh_debug_ui, spawn_debug_info_overlay,
@@ -195,6 +199,39 @@ pub(crate) fn handle_debug_hotkeys(
     }
 }
 
+/// Handle debug hotkeys that need additional resources (wallet, enemies)
+pub(crate) fn handle_debug_cheat_hotkeys(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut debug_state: ResMut<DebugState>,
+    mut wallet: ResMut<PlayerWallet>,
+    enemy_query: Query<Entity, With<Enemy>>,
+    mut death_events: MessageWriter<DeathEvent>,
+) {
+    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+
+    if !debug_state.ui_visible && !ctrl {
+        return;
+    }
+
+    // Ctrl+M: Give money
+    if ctrl && keyboard.just_pressed(KeyCode::KeyM) {
+        let amount = 500;
+        wallet.add(amount);
+        debug_state.set_message(format!("+{} coins ({})", amount, wallet.coins), 2.0);
+        info!("[DEBUG] Added {} coins. Total: {}", amount, wallet.coins);
+    }
+
+    // Ctrl+K: Kill all enemies in room
+    if ctrl && keyboard.just_pressed(KeyCode::KeyK) {
+        let enemy_count = enemy_query.iter().count();
+        for entity in &enemy_query {
+            death_events.write(DeathEvent { entity });
+        }
+        debug_state.set_message(format!("Killed {} enemies", enemy_count), 2.0);
+        info!("[DEBUG] Killed {} enemies", enemy_count);
+    }
+}
+
 /// Handle button clicks in debug UI
 pub(crate) fn handle_debug_buttons(
     mut commands: Commands,
@@ -206,6 +243,9 @@ pub(crate) fn handle_debug_buttons(
     mut button_query: Query<(&DebugButton, &Interaction), Changed<Interaction>>,
     player_query: Query<(&Transform, &mut Health), With<Player>>,
     existing_ui: Query<Entity, With<DebugUI>>,
+    mut wallet: ResMut<PlayerWallet>,
+    enemy_query: Query<Entity, With<Enemy>>,
+    mut death_events: MessageWriter<DeathEvent>,
 ) {
     for (button, interaction) in &mut button_query {
         if *interaction != Interaction::Pressed {
@@ -302,6 +342,20 @@ pub(crate) fn handle_debug_buttons(
                     spawn_debug_info_overlay(&mut commands);
                 }
             }
+            DebugAction::GiveMoney => {
+                let amount = 500;
+                wallet.add(amount);
+                debug_state.set_message(format!("+{} coins ({})", amount, wallet.coins), 2.0);
+                info!("[DEBUG] Added {} coins. Total: {}", amount, wallet.coins);
+            }
+            DebugAction::KillAllEnemies => {
+                let enemy_count = enemy_query.iter().count();
+                for entity in &enemy_query {
+                    death_events.write(DeathEvent { entity });
+                }
+                debug_state.set_message(format!("Killed {} enemies", enemy_count), 2.0);
+                info!("[DEBUG] Killed {} enemies", enemy_count);
+            }
             DebugAction::Close => {
                 debug_state.ui_visible = false;
                 for entity in &existing_ui {
@@ -342,13 +396,17 @@ pub(crate) fn apply_invincibility(
     }
 }
 
-/// Update the debug info overlay with current player state
+/// Update the debug info overlay with current player state and run progress
 pub(crate) fn update_debug_info_overlay(
     mut commands: Commands,
     debug_state: Res<DebugState>,
     run_config: Res<RunConfig>,
     run_state: Res<State<RunState>>,
+    segment_progress: Res<SegmentProgress>,
+    room_graph: Res<RoomGraph>,
+    wallet: Res<PlayerWallet>,
     player_query: Query<(&Transform, &Health), With<Player>>,
+    enemy_query: Query<(), With<Enemy>>,
     mut overlay_query: Query<&mut Text, With<DebugInfoOverlay>>,
     existing_overlay: Query<Entity, With<DebugInfoOverlay>>,
 ) {
@@ -371,16 +429,54 @@ pub(crate) fn update_debug_info_overlay(
         (player_query.iter().next(), overlay_query.single_mut())
     {
         let pos = transform.translation;
+        let current_room = room_graph
+            .current_room_id
+            .as_deref()
+            .unwrap_or("(none)");
+        let biome = segment_progress
+            .current_biome_id
+            .as_deref()
+            .unwrap_or("(none)");
+        let enemy_count = enemy_query.iter().count();
+
         **text = format!(
-            "Pos: ({:.0}, {:.0})\nHP: {:.0}/{:.0}\nSeed: {}\nSegment: {}\nState: {:?}\nInvincible: {}",
+            "=== Player ===\n\
+             Pos: ({:.0}, {:.0})\n\
+             HP: {:.0}/{:.0}\n\
+             Coins: {}\n\
+             Invincible: {}\n\
+             \n\
+             === Run ===\n\
+             Seed: {}\n\
+             Segment: {}\n\
+             State: {:?}\n\
+             \n\
+             === Progress ===\n\
+             Rooms cleared: {}\n\
+             Bosses (segment): {}\n\
+             Bosses (total): {}\n\
+             \n\
+             === Room ===\n\
+             Current: {}\n\
+             Biome: {}\n\
+             Enemies: {}\n\
+             Cleared: {}",
             pos.x,
             pos.y,
             health.current,
             health.max,
+            wallet.coins,
+            debug_state.invincible,
             run_config.seed,
             run_config.segment_index,
             run_state.get(),
-            debug_state.invincible
+            segment_progress.rooms_cleared_this_segment,
+            segment_progress.bosses_defeated_this_segment,
+            segment_progress.total_bosses_defeated,
+            current_room,
+            biome,
+            enemy_count,
+            room_graph.rooms_cleared.len()
         );
     }
 }

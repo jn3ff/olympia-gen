@@ -8,11 +8,12 @@ mod tests;
 mod triggers;
 mod types;
 
+pub use buffs::{get_buff_effect_tier, has_buff_effect};
 pub use events::{
     EncounterCompletedEvent, EncounterStartedEvent, SpawnCombatEventEvent,
     SpawnNarrativeEventEvent, TagTransformedEvent, TagsAppliedEvent, TriggerCuratedEventEvent,
 };
-pub use types::{ActiveEncounter, EncounterBuffs, EncounterTagHistory};
+pub use types::{ActiveBuff, ActiveEncounter, EncounterBuffs, EncounterTagHistory};
 
 use bevy::prelude::*;
 

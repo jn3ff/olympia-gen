@@ -3,6 +3,8 @@
 //! Handles animation states (idle, walk, attack) and frame progression
 //! for layered sprites.
 
+#![allow(dead_code)]
+
 use bevy::ecs::message::Message;
 use bevy::prelude::*;
 

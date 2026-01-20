@@ -3,6 +3,8 @@
 //! Loads the sprite manifest JSON which defines all available sprites,
 //! their frame counts, sizes, and attachment points.
 
+#![allow(dead_code)]
+
 use bevy::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;

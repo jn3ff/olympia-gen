@@ -12,8 +12,12 @@ mod ui;
 #[cfg(test)]
 mod tests;
 
+pub use components::{
+    ArenaPortal, PortalBarrier, PortalDisabled, PortalEnabled, PortalFloor, RoomExit, RoomInstance,
+};
+pub use data::{PortalCondition, PortalEnableCondition, RoomData, RoomExitConfig};
 pub use events::{BossDefeatedEvent, EnterRoomEvent, ExitRoomEvent, RoomClearedEvent};
-pub use graph::{RoomGraph, TransitionCooldown};
+pub use graph::{PlayerInPortalZone, RoomGraph, RoomTransition, TransitionCooldown};
 pub use registry::RoomRegistry;
 
 use bevy::prelude::*;
@@ -28,7 +32,7 @@ use crate::rooms::systems::{
     handle_boss_defeated, handle_room_clear_coins, populate_segment_room_pool,
     process_room_transitions, reset_transition_cooldown, tick_transition_cooldown,
     track_arena_portal_zone, track_player_portal_zone, track_player_shop_zone,
-    update_portal_exit_animations,
+    update_portal_exit_animations, update_progress_on_room_clear,
 };
 use crate::rooms::ui::{update_arena_portal_tooltip, update_portal_tooltip, update_shop_tooltip};
 
@@ -103,6 +107,7 @@ impl Plugin for RoomsPlugin {
                     emit_encounter_started,
                     detect_room_cleared,
                     emit_encounter_completed,
+                    update_progress_on_room_clear,
                 )
                     .chain()
                     .run_if(in_state(RunState::Room)),

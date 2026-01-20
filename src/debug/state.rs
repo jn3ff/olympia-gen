@@ -54,5 +54,7 @@ pub enum DebugAction {
     FullHeal,
     CycleTier,
     ToggleInfo,
+    GiveMoney,
+    KillAllEnemies,
     Close,
 }

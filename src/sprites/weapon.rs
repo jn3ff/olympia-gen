@@ -3,6 +3,8 @@
 //! Handles positioning weapon sprites relative to character body sprites
 //! using anchor points defined in the sprite manifest.
 
+#![allow(dead_code)]
+
 use bevy::prelude::*;
 
 use super::{

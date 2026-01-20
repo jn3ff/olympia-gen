@@ -3,6 +3,8 @@
 //! Provides a hierarchical sprite system where characters are composed of
 //! multiple layers (body, armor, weapon) that can be individually swapped.
 
+#![allow(dead_code)]
+
 use bevy::prelude::*;
 
 /// Marker component for the root of a layered sprite entity.

@@ -13,39 +13,37 @@ pub struct RoomRegistry {
 
 pub(crate) fn setup_room_registry(mut registry: ResMut<RoomRegistry>) {
     // Register default rooms - in a full implementation these would come from RON files
+    // NOTE: Currently only Left/Right exits are used. Up/Down portal code exists but is disabled.
     registry.rooms = vec![
         RoomData {
-            id: "room_left_1".to_string(),
+            id: "room_combat_1".to_string(),
             name: "Western Chamber".to_string(),
-            exits: vec![Direction::Right, Direction::Up],
+            exits: vec![Direction::Left, Direction::Right],
             exit_configs: Some(vec![
-                // Right exit requires clearing enemies first
+                RoomExitConfig::when_cleared(Direction::Left),
                 RoomExitConfig::when_cleared(Direction::Right),
-                // Up exit is always enabled (escape route)
-                RoomExitConfig::always_enabled(Direction::Up),
             ]),
             boss_room: false,
             width: 800.0,
             height: 500.0,
         },
         RoomData {
-            id: "room_right_1".to_string(),
+            id: "room_combat_2".to_string(),
             name: "Eastern Hall".to_string(),
-            exits: vec![Direction::Left, Direction::Down],
+            exits: vec![Direction::Left, Direction::Right],
             exit_configs: Some(vec![
                 RoomExitConfig::when_cleared(Direction::Left),
-                RoomExitConfig::always_enabled(Direction::Down),
+                RoomExitConfig::when_cleared(Direction::Right),
             ]),
             boss_room: false,
             width: 900.0,
             height: 450.0,
         },
         RoomData {
-            id: "room_up_1".to_string(),
-            name: "Upper Sanctum".to_string(),
-            exits: vec![Direction::Down, Direction::Left, Direction::Right],
+            id: "room_combat_3".to_string(),
+            name: "Central Sanctum".to_string(),
+            exits: vec![Direction::Left, Direction::Right],
             exit_configs: Some(vec![
-                RoomExitConfig::always_enabled(Direction::Down),
                 RoomExitConfig::when_cleared(Direction::Left),
                 RoomExitConfig::when_cleared(Direction::Right),
             ]),
@@ -54,10 +52,13 @@ pub(crate) fn setup_room_registry(mut registry: ResMut<RoomRegistry>) {
             height: 600.0,
         },
         RoomData {
-            id: "room_down_1".to_string(),
+            id: "room_combat_4".to_string(),
             name: "Lower Depths".to_string(),
-            exits: vec![Direction::Up],
-            exit_configs: Some(vec![RoomExitConfig::when_cleared(Direction::Up)]),
+            exits: vec![Direction::Left, Direction::Right],
+            exit_configs: Some(vec![
+                RoomExitConfig::when_cleared(Direction::Left),
+                RoomExitConfig::when_cleared(Direction::Right),
+            ]),
             boss_room: false,
             width: 700.0,
             height: 400.0,
@@ -65,9 +66,12 @@ pub(crate) fn setup_room_registry(mut registry: ResMut<RoomRegistry>) {
         RoomData {
             id: "boss_room".to_string(),
             name: "Champion's Arena".to_string(),
-            exits: vec![Direction::Down],
+            exits: vec![Direction::Left, Direction::Right],
             // Boss room exit requires defeating the boss (no enemies remaining)
-            exit_configs: Some(vec![RoomExitConfig::when_cleared(Direction::Down)]),
+            exit_configs: Some(vec![
+                RoomExitConfig::when_cleared(Direction::Left),
+                RoomExitConfig::when_cleared(Direction::Right),
+            ]),
             boss_room: true,
             width: 1200.0,
             height: 700.0,
@@ -79,18 +83,12 @@ pub(crate) fn find_room_for_direction(
     registry: &RoomRegistry,
     direction: Direction,
 ) -> Option<String> {
-    // Simple mapping: direction determines which room we go to
-    let target_id = match direction {
-        Direction::Left => "room_left_1",
-        Direction::Right => "room_right_1",
-        Direction::Up => "room_up_1",
-        Direction::Down => "room_down_1",
-    };
-
+    // Find any non-boss room that has an exit in the given direction
+    // (Up/Down directions currently disabled - rooms only have Left/Right exits)
     registry
         .rooms
         .iter()
-        .find(|r| r.id == target_id)
+        .find(|r| !r.boss_room && r.exits.contains(&direction))
         .map(|r| r.id.clone())
 }
 

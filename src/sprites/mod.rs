@@ -24,6 +24,8 @@ impl Plugin for SpritesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpriteManifest>()
             .init_resource::<AnchorDatabase>()
+            .add_message::<AnimationStateChanged>()
+            .add_message::<AnimationFinished>()
             .add_systems(Startup, load_sprite_manifest)
             .add_systems(
                 Update,

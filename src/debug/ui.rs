@@ -195,6 +195,32 @@ pub(crate) fn spawn_debug_ui(commands: &mut Commands) {
                     );
                 });
 
+            // === Cheats Section ===
+            spawn_section_header(parent, "Cheats", title_color);
+
+            parent
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    spawn_debug_button(
+                        row,
+                        "+500 Gold [Ctrl+M]",
+                        DebugAction::GiveMoney,
+                        button_color,
+                        text_color,
+                    );
+                    spawn_debug_button(
+                        row,
+                        "Kill All [Ctrl+K]",
+                        DebugAction::KillAllEnemies,
+                        button_color,
+                        text_color,
+                    );
+                });
+
             // === Misc Section ===
             spawn_section_header(parent, "Misc", title_color);
 
