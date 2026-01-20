@@ -7,6 +7,7 @@ mod encounters;
 mod movement;
 mod rewards;
 mod rooms;
+mod sprites;
 mod ui;
 
 use avian2d::prelude::*;
@@ -33,6 +34,7 @@ fn main() {
         rooms::RoomsPlugin,
         rewards::RewardsPlugin,
         encounters::EncountersPlugin,
+        sprites::SpritesPlugin,
         ui::UiPlugin,
     ));
 

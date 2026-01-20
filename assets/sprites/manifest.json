@@ -1,0 +1,60 @@
+{
+  "version": 2,
+  "assets": {
+    "_comment": "Example entries - replace with actual generated sprites",
+
+    "player.base.zeus_idle_1": {
+      "path": "sprites/used/player/base/zeus_idle_1.png",
+      "frames": 1,
+      "size": 64,
+      "weapon_anchor": { "x": 45, "y": 38 },
+      "weapon_rotation": -45
+    },
+    "player.base.zeus_attack_1": {
+      "path": "sprites/used/player/base/zeus_attack_1.png",
+      "frames": 1,
+      "size": 64,
+      "weapon_anchor": { "x": 30, "y": 20 },
+      "weapon_rotation": -135
+    },
+    "player.base.zeus_attack_2": {
+      "path": "sprites/used/player/base/zeus_attack_2.png",
+      "frames": 1,
+      "size": 64,
+      "weapon_anchor": { "x": 50, "y": 35 },
+      "weapon_rotation": 0
+    },
+    "player.base.zeus_attack_3": {
+      "path": "sprites/used/player/base/zeus_attack_3.png",
+      "frames": 1,
+      "size": 64,
+      "weapon_anchor": { "x": 55, "y": 45 },
+      "weapon_rotation": 45
+    },
+
+    "weapon.sword.basic.idle": {
+      "path": "sprites/used/weapons/sword/basic/idle.png",
+      "frames": 1,
+      "size": 64,
+      "hilt_point": { "x": 32, "y": 58 }
+    },
+    "weapon.sword.basic.raised": {
+      "path": "sprites/used/weapons/sword/basic/raised.png",
+      "frames": 1,
+      "size": 64,
+      "hilt_point": { "x": 32, "y": 58 }
+    },
+    "weapon.sword.basic.swing_h": {
+      "path": "sprites/used/weapons/sword/basic/swing_h.png",
+      "frames": 1,
+      "size": 64,
+      "hilt_point": { "x": 6, "y": 32 }
+    },
+    "weapon.sword.basic.swing_down": {
+      "path": "sprites/used/weapons/sword/basic/swing_down.png",
+      "frames": 1,
+      "size": 64,
+      "hilt_point": { "x": 32, "y": 58 }
+    }
+  }
+}

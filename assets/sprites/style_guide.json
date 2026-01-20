@@ -1,0 +1,61 @@
+{
+  "version": 3,
+  "base_style": "Retro video game pixel art sprite (NOT digital illustration), black 1px outlines, light source from upper-left (highlights on upper-left edges, shadows on lower-right), medium saturation colors (vibrant but earthy, not neon), crisp pixelated edges, no anti-aliasing, no smooth gradients",
+  "aesthetic": "Mythic Greek world with weathered, lived-in feel, mix of human, divine, and monstrous",
+  "do_not_constrain": [
+    "specific colors (let subjects dictate, unless god palette specified)",
+    "poses or expressions",
+    "level of scary vs friendly",
+    "silhouette shapes"
+  ],
+  "notes": {
+    "what_works": [
+      "Explicit 'retro video game pixel art sprite' framing",
+      "Mentioning 'NOT digital illustration' to prevent drift",
+      "Character descriptions that include equipment/clothing details",
+      "God palettes applied to full character designs"
+    ],
+    "what_fails": [
+      "Vague creature descriptions can drift to illustration style",
+      "Complex scene descriptions get misinterpreted",
+      "Without explicit pixel art framing, model defaults to smooth digital art"
+    ],
+    "reference_examples": [
+      "examples/zeus_tunic_reference.png - ideal pixel art style, proper outlines, good palette use"
+    ]
+  },
+  "animation_guidance": {
+    "format": "Horizontal sprite sheet, all frames same height, each frame shows same character in different pose",
+    "prompt_pattern": "sprite sheet showing [N] animation frames of [character] in a [action] sequence, frames arranged left to right, each frame [size]x[size] pixels"
+  },
+  "palettes": {
+    "zeus": {
+      "primary": "#FFD700",
+      "secondary": "#00BFFF",
+      "accent": "#FFFFFF",
+      "dark": "#1a1a2e",
+      "description": "gold, electric blue, white, storm dark"
+    },
+    "poseidon": {
+      "primary": "#1a3a5c",
+      "secondary": "#000000",
+      "accent": "#FFFFFF",
+      "dark": "#0a1520",
+      "description": "dark blue, black, white foam"
+    },
+    "ares": {
+      "primary": "#8B4513",
+      "secondary": "#DC143C",
+      "accent": "#708090",
+      "dark": "#2a1a0a",
+      "description": "brown, crimson, steel gray"
+    },
+    "demeter": {
+      "primary": "#90EE90",
+      "secondary": "#87CEEB",
+      "accent": "#F0E68C",
+      "dark": "#1a2a1a",
+      "description": "gentle green, frost blue, gentle yellow"
+    }
+  }
+}

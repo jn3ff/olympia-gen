@@ -1,0 +1,13 @@
+{
+  "id": "0f56b8e3",
+  "created_at": "2026-01-19T20:21:29.110967",
+  "prompt": "Greek warrior tunic and armor, heroic demigod clothing, flowing cape",
+  "full_prompt": "Pixel art sprite with black 1px outlines, light source from upper-left (highlights on upper-left edges, shadows on lower-right), medium saturation colors (vibrant but earthy, not neon), appropriate detail level for sprite size, single sprite, 64x64 pixels, Mythic Greek world with weathered, lived-in feel, mix of human, divine, and monstrous, using gold, electric blue, white, dark storm colors color palette, Greek warrior tunic and armor, heroic demigod clothing, flowing cape",
+  "god_palette": "zeus",
+  "category": "player",
+  "subcategory": "clothing",
+  "name": "zeus_tunic",
+  "size": 64,
+  "frames": 1,
+  "status": "staging"
+}

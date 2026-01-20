@@ -4,9 +4,12 @@
 //! goes below 0, schedules adversarial events within a configurable number
 //! of segments.
 
-use bevy::ecs::message::Message;
+use bevy::ecs::message::{Message, MessageReader, MessageWriter};
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
+
+use crate::content::{ContentRegistry, GameplayDefaults};
+use crate::core::{RunConfig, SegmentCompletedEvent};
 
 // ============================================================================
 // Resources
@@ -198,6 +201,85 @@ pub struct FaithChangedEvent {
 }
 
 impl Message for FaithChangedEvent {}
+
+/// Check if any god has negative faith and schedule adversarial events.
+/// Runs when entering the Arena (hub) after segments.
+pub(crate) fn check_faith_and_schedule_adversarial(
+    mut segment_events: MessageReader<SegmentCompletedEvent>,
+    mut run_faith: ResMut<RunFaith>,
+    run_config: Res<RunConfig>,
+    content_registry: Res<ContentRegistry>,
+    gameplay_defaults: Res<GameplayDefaults>,
+    mut schedule_events: MessageWriter<AdversarialEventScheduledEvent>,
+) {
+    for event in segment_events.read() {
+        info!("Checking faith at end of segment {}", event.segment_index);
+
+        let gods_needing_event: Vec<String> = run_faith
+            .faith_by_god
+            .iter()
+            .filter(|(god_id, faith)| **faith < 0 && run_faith.needs_adversarial_event(god_id))
+            .map(|(god_id, _)| god_id.clone())
+            .collect();
+
+        for god_id in gods_needing_event {
+            let event_id = content_registry
+                .events
+                .values()
+                .find(|e| e.reward_tags.contains(&god_id))
+                .map(|e| e.id.clone());
+
+            if let Some(event_id) = event_id {
+                let trigger_within = gameplay_defaults.adversarial_events.trigger_within_segments;
+                let trigger_at = run_config.segment_index
+                    + ADVERSARIAL_MIN_DELAY
+                    + (rand::random::<u32>() % trigger_within.max(1));
+
+                run_faith.schedule_adversarial_event(&god_id, &event_id, trigger_at);
+
+                schedule_events.write(AdversarialEventScheduledEvent {
+                    god_id: god_id.clone(),
+                    event_id: event_id.clone(),
+                    trigger_at_segment: trigger_at,
+                });
+
+                info!(
+                    "Scheduled adversarial event '{}' from {} at segment {} (current: {})",
+                    event_id, god_id, trigger_at, run_config.segment_index
+                );
+            } else {
+                warn!("No adversarial event found for god '{}' - skipping", god_id);
+            }
+        }
+    }
+}
+
+/// Check if any scheduled adversarial events should trigger at the current segment.
+pub(crate) fn check_trigger_adversarial_events(
+    mut run_faith: ResMut<RunFaith>,
+    run_config: Res<RunConfig>,
+    mut trigger_events: MessageWriter<TriggerAdversarialEvent>,
+) {
+    let events_to_trigger: Vec<(String, String)> = run_faith
+        .get_events_for_segment(run_config.segment_index)
+        .iter()
+        .map(|e| (e.god_id.clone(), e.event_id.clone()))
+        .collect();
+
+    for (god_id, event_id) in events_to_trigger {
+        run_faith.mark_adversarial_triggered(&god_id);
+
+        trigger_events.write(TriggerAdversarialEvent {
+            god_id: god_id.clone(),
+            event_id: event_id.clone(),
+        });
+
+        info!(
+            "Triggering adversarial event '{}' from {} at segment {}",
+            event_id, god_id, run_config.segment_index
+        );
+    }
+}
 
 /// Event fired when an adversarial event is scheduled
 #[derive(Debug)]

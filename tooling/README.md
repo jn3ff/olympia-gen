@@ -1,0 +1,1 @@
+This folder contains tooling for humans and AI to use while developing Olympia.

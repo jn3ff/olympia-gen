@@ -1,7 +1,18 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-The project is a Rust/Bevy game prototype. Core wiring happens in `src/main.rs`, which registers domain plugins for gameplay systems. Each major domain lives in its own module folder with a `mod.rs` entry point, for example `src/core/mod.rs`, `src/movement/mod.rs`, `src/combat/mod.rs`, `src/rooms/mod.rs`, `src/rewards/mod.rs`, and `src/ui/mod.rs`. Shared data definitions (assets, enums, data schemas) live in `src/content/mod.rs`. Build artifacts go to `target/`, and `PLAN.md` captures roadmap notes.
+The project is a Rust/Bevy game prototype. Core wiring happens in `src/main.rs`, which registers domain plugins for gameplay systems. Each major domain lives in its own module folder with a `mod.rs` entry point and focused submodules; `mod.rs` re-exports public types needed by other domains. Examples:
+- `src/core/{events,resources,state,systems,ui}/`
+- `src/movement/{components,resources,bootstrap,dev,systems}/`
+- `src/combat/{components,attacks,resources,events,systems,ai,spawn}/`
+- `src/encounters/{types,selection,triggers,buffs,events,tests}/`
+- `src/rooms/{components,data,graph,registry,spawn,systems,ui,events,tests}/`
+- `src/rewards/{build,economy,types,choices,shop,ui,faith}/`
+- `src/ui/{hud_player,hud_wallet,hud_enemy,hud_boss,death}/`
+- `src/debug/{state,ui,systems}/`
+- `src/sprites/{manifest,layers,animation,weapon}/`
+
+Shared data definitions (assets, enums, data schemas) live in `src/content/mod.rs`. Build artifacts go to `target/`, and `PLAN.md` captures roadmap notes. Each new module file should start with a short `//!` domain description.
 
 ## Build, Test, and Development Commands
 - `cargo run` — build and launch the game with the default Bevy window settings.
@@ -9,9 +20,9 @@ The project is a Rust/Bevy game prototype. Core wiring happens in `src/main.rs`,
 - `cargo check` — fast type-checking pass during iteration.
 - `cargo test` — run unit/integration tests (none exist yet, but use this when adding tests).
 
-## Task Tracking
+## Issue Tracking
 
-Use 'bd' for task tracking
+Use 'bd' for issue/task tracking
 
 ## Coding Style & Naming Conventions
 Use standard Rust style: 4-space indentation, `snake_case` for functions/fields, `PascalCase` for types and enums, and `SCREAMING_SNAKE_CASE` for constants. Bevy patterns are preferred: ECS types should be named clearly (`Component`, `Resource`, `Event` derivations), and plugin structs should follow `XxxPlugin` naming. Module boundaries map to gameplay domains; keep new systems in the most relevant module and expose only necessary types.

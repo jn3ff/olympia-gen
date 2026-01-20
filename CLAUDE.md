@@ -14,6 +14,10 @@ cargo clippy         # Lint
 cargo fmt            # Format code (run before submitting changes)
 ```
 
+## Issue Tracking 
+
+Use 'bd' for issue/task tracking
+
 ## Project Overview
 
 Olympia is a 2D boss-rush roguelike platformer built with Bevy 0.18 and avian2d physics. Players choose a demigod character tied to an Olympian god, navigate platforming rooms with combat encounters, defeat bosses, and build power through equipment, skills, and blessings.
